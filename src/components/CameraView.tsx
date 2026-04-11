@@ -13,10 +13,11 @@ const CONNECTIONS: [number, number][] = [
 interface Props {
   landmarks: Array<{ x: number; y: number; z: number }> | null
   gestureName: string | null
+  isLoaded: boolean
   onReady: (video: HTMLVideoElement, canvas: HTMLCanvasElement) => void
 }
 
-export function CameraView({ landmarks, gestureName, onReady }: Props) {
+export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props) {
   const { videoRef, isReady, error } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -133,6 +134,22 @@ export function CameraView({ landmarks, gestureName, onReady }: Props) {
               }}
             >
               Starting camera...
+            </div>
+          )}
+          {!isLoaded && isReady && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                fontSize: '13px',
+              }}
+            >
+              Loading gesture model...
             </div>
           )}
         </>

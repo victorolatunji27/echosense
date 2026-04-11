@@ -6,6 +6,7 @@ interface Props {
   confidence: number
   transcript: string[]
   isSpeaking: boolean
+  copied: boolean
   onCopy: () => void
   onClear: () => void
 }
@@ -18,6 +19,7 @@ export function OutputPanel({
   confidence,
   transcript,
   isSpeaking,
+  copied,
   onCopy,
   onClear,
 }: Props) {
@@ -46,12 +48,14 @@ export function OutputPanel({
           Now detecting
         </div>
         <div
+          key={displayText}
           style={{
             fontSize: '28px',
             fontWeight: 600,
             color: '#0f172a',
             minHeight: '44px',
             marginTop: '4px',
+            animation: 'fadeUp 0.2s ease-out',
           }}
         >
           {displayText}
@@ -178,7 +182,7 @@ export function OutputPanel({
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
           {[
-            { label: 'Copy', action: onCopy },
+            { label: copied ? 'Copied!' : 'Copy', action: onCopy },
             { label: 'Clear', action: onClear },
           ].map(({ label, action }) => (
             <button

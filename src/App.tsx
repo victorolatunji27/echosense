@@ -1,9 +1,12 @@
 import { useRef, useState, useEffect } from 'react'
 import { useGestureRecognizer } from './hooks/useGestureRecognizer'
 import { useTranscript } from './hooks/useTranscript'
+import { useTTS } from './hooks/useTTS'
 import { getDisplayText } from './utils/gestureMap'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
+
+const ELEVENLABS_KEY = import.meta.env.VITE_ELEVENLABS_KEY ?? ''
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -11,8 +14,8 @@ function App() {
 
   const { landmarks, gestureName, gestureScore, isLoaded } = useGestureRecognizer(videoRef)
   const { transcript, addPhrase, clearTranscript } = useTranscript()
+  const { speak, isSpeaking } = useTTS(ELEVENLABS_KEY)
 
-  const [isSpeaking, setIsSpeaking] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const displayText = getDisplayText(gestureName)
@@ -36,6 +39,7 @@ function App() {
       displayText !== lastCommittedRef.current
     ) {
       addPhrase(displayText)
+      speak(displayText)
       lastCommittedRef.current = displayText
       holdCountRef.current = 0
     }
@@ -52,8 +56,8 @@ function App() {
     ;(canvasRef as React.MutableRefObject<HTMLCanvasElement>).current = canvas
   }
 
-  // suppress unused warning — isSpeaking will be set by TTS in next phase
-  void setIsSpeaking
+  // suppress unused — copied state used for future UI feedback
+  void copied
 
   return (
     <div
@@ -87,9 +91,14 @@ function App() {
           />
           <span style={{ fontSize: '11px', color: '#1D9E75' }}>Live</span>
         </div>
-        <span style={{ fontSize: '12px', color: '#64748b' }}>
-          {isLoaded ? 'Model ready' : 'Loading model...'}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {landmarks !== null && (
+            <span style={{ fontSize: '12px', color: '#1D9E75' }}>Hand detected</span>
+          )}
+          <span style={{ fontSize: '12px', color: '#64748b' }}>
+            {isLoaded ? 'Model ready' : 'Loading model...'}
+          </span>
+        </div>
       </header>
 
       {/* Main */}
@@ -103,6 +112,7 @@ function App() {
         }}
       >
         <div
+          className="main-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: '640px 1fr',
@@ -114,6 +124,7 @@ function App() {
           <CameraView
             landmarks={landmarks}
             gestureName={gestureName}
+            isLoaded={isLoaded}
             onReady={onReady}
           />
 
@@ -124,6 +135,7 @@ function App() {
             confidence={gestureScore}
             transcript={transcript}
             isSpeaking={isSpeaking}
+            copied={copied}
             onCopy={onCopy}
             onClear={clearTranscript}
           />
