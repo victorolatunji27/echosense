@@ -17,6 +17,19 @@ function App() {
   const { speak, isSpeaking } = useTTS(ELEVENLABS_KEY)
 
   const [copied, setCopied] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [signCount, setSignCount] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  function formatTime(s: number): string {
+    const m = Math.floor(s / 60)
+    const sec = s % 60
+    return `${m}m ${sec.toString().padStart(2, '0')}s`
+  }
 
   const displayText = getDisplayText(gestureName)
 
@@ -40,6 +53,7 @@ function App() {
     ) {
       addPhrase(displayText)
       speak(displayText)
+      setSignCount((c) => c + 1)
       lastCommittedRef.current = displayText
       holdCountRef.current = 0
     }
@@ -56,8 +70,10 @@ function App() {
     ;(canvasRef as React.MutableRefObject<HTMLCanvasElement>).current = canvas
   }
 
-  // suppress unused — copied state used for future UI feedback
-  void copied
+  function resetSession() {
+    setElapsed(0)
+    setSignCount(0)
+  }
 
   return (
     <div
@@ -95,6 +111,9 @@ function App() {
           {landmarks !== null && (
             <span style={{ fontSize: '12px', color: '#1D9E75' }}>Hand detected</span>
           )}
+          <span style={{ fontSize: '12px', color: '#64748b' }}>
+            {signCount} signs · {formatTime(elapsed)}
+          </span>
           <span style={{ fontSize: '12px', color: '#64748b' }}>
             {isLoaded ? 'Model ready' : 'Loading model...'}
           </span>
@@ -137,7 +156,7 @@ function App() {
             isSpeaking={isSpeaking}
             copied={copied}
             onCopy={onCopy}
-            onClear={clearTranscript}
+            onClear={() => { clearTranscript(); resetSession() }}
           />
         </div>
       </main>
