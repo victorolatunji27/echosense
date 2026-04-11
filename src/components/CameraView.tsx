@@ -82,15 +82,41 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
             position: 'absolute',
             inset: 0,
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#f87171',
-            fontSize: '14px',
-            padding: '16px',
+            gap: '12px',
+            padding: '24px',
             textAlign: 'center',
           }}
         >
-          {error}
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="12" width="40" height="28" rx="4" stroke="#ef4444" strokeWidth="3"/>
+            <circle cx="24" cy="26" r="7" stroke="#ef4444" strokeWidth="3"/>
+            <line x1="8" y1="8" x2="40" y2="40" stroke="#ef4444" strokeWidth="3" strokeLinecap="round"/>
+          </svg>
+          <div style={{ fontSize: '16px', fontWeight: 600, color: '#f87171' }}>
+            Camera access blocked
+          </div>
+          <div style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '320px', lineHeight: 1.5 }}>
+            Click the camera icon in your browser's address bar and select Allow, then click Try Again below.
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              marginTop: '8px',
+              padding: '8px 20px',
+              borderRadius: '8px',
+              background: '#1D9E75',
+              color: 'white',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Try Again
+          </button>
         </div>
       ) : (
         <>
@@ -131,6 +157,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
                 justifyContent: 'center',
                 color: '#ffffff',
                 fontSize: '14px',
+                animation: 'pulse 1.5s ease-in-out infinite',
               }}
             >
               Starting camera...
