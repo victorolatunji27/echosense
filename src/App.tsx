@@ -5,6 +5,7 @@ import { useTTS } from './hooks/useTTS'
 import { getDisplayText } from './utils/gestureMap'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
+import { GestureFlash } from './components/GestureFlash'
 
 const ELEVENLABS_KEY = import.meta.env.VITE_ELEVENLABS_KEY ?? ''
 
@@ -17,6 +18,7 @@ function App() {
   const { speak, isSpeaking } = useTTS(ELEVENLABS_KEY)
 
   const [copied, setCopied] = useState(false)
+  const [flashText, setFlashText] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [signCount, setSignCount] = useState(0)
 
@@ -53,6 +55,7 @@ function App() {
     ) {
       addPhrase(displayText)
       speak(displayText)
+      setFlashText(displayText)
       setSignCount((c) => c + 1)
       lastCommittedRef.current = displayText
       holdCountRef.current = 0
@@ -70,6 +73,12 @@ function App() {
     ;(canvasRef as React.MutableRefObject<HTMLCanvasElement>).current = canvas
   }
 
+  useEffect(() => {
+    if (flashText === null) return
+    const id = setTimeout(() => setFlashText(null), 1500)
+    return () => clearTimeout(id)
+  }, [flashText])
+
   function resetSession() {
     setElapsed(0)
     setSignCount(0)
@@ -84,6 +93,7 @@ function App() {
         flexDirection: 'column',
       }}
     >
+      <GestureFlash text={flashText} />
       {/* Header */}
       <header
         style={{
