@@ -1,31 +1,38 @@
+import { formatStopwatch } from '../hooks/useSentenceBuilder'
+
 interface Props {
   bufferDisplay: string[]
   currentSentence: string
-  pendingSentence: string
   sentenceHistory: string[]
   isProcessing: boolean
+  sessionSeconds: number
+  isTiming: boolean
   onBuild: () => void
-  onRelease: () => void
   onClear: () => void
   onSpeak: (text: string) => void
   currentGesture: string | null
   displayText: string
 }
 
+function isLetterToken(t: string): boolean {
+  return t.length === 1 && t >= 'A' && t <= 'Z'
+}
+
 export function SentencePanel({
   bufferDisplay,
   currentSentence,
-  pendingSentence,
   sentenceHistory,
   isProcessing,
+  sessionSeconds,
+  isTiming,
   onBuild,
-  onRelease,
   onClear,
   onSpeak,
   currentGesture,
   displayText,
 }: Props) {
   const hasLiveGesture = currentGesture !== null && currentGesture !== 'None' && displayText !== ''
+  const showStopwatch = isTiming || sessionSeconds > 0
 
   return (
     <div
@@ -79,7 +86,6 @@ export function SentencePanel({
           </div>
         </div>
 
-        {/* Pulse dot */}
         <div
           style={{
             width: '9px',
@@ -93,64 +99,167 @@ export function SentencePanel({
         />
       </div>
 
-      {/* ── Sign buffer ───────────────────────────────────────────── */}
+      {/* ── Signing label + stopwatch ─────────────────────────────── */}
       <div>
         <div
           style={{
-            fontSize: '10px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.09em',
-            color: 'var(--primary)',
-            marginBottom: '10px',
-            fontWeight: 500,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            justifyContent: 'space-between',
+            marginBottom: '10px',
           }}
         >
-          Signs collected
-          {bufferDisplay.length > 0 && (
-            <span
+          <div
+            style={{
+              fontSize: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.09em',
+              color: isTiming ? 'var(--amber)' : 'var(--primary)',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            Signing…
+            {bufferDisplay.length > 0 && isTiming && (
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: 'var(--amber)',
+                  animation: 'pulse 1.2s ease-in-out infinite',
+                  display: 'inline-block',
+                }}
+              />
+            )}
+          </div>
+
+          {/* Stopwatch */}
+          {showStopwatch && (
+            <div
               style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: 'var(--primary)',
-                animation: 'pulse 1.2s ease-in-out infinite',
-                display: 'inline-block',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '3px 10px',
+                background: isTiming ? 'rgba(200,169,110,0.10)' : 'rgba(26,77,58,0.08)',
+                border: `1px solid ${isTiming ? 'rgba(200,169,110,0.25)' : 'rgba(26,77,58,0.15)'}`,
+                borderRadius: 'var(--r-pill)',
+                transition: 'all 0.3s ease',
               }}
-            />
+            >
+              {isTiming && (
+                <div
+                  style={{
+                    width: '5px',
+                    height: '5px',
+                    borderRadius: '50%',
+                    background: 'var(--amber)',
+                    animation: 'pulse 1s ease-in-out infinite',
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+              {!isTiming && sessionSeconds > 0 && (
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <polyline
+                    points="2,5 4,8 8,2"
+                    stroke="var(--primary)"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+              <span
+                style={{
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: isTiming ? '#8B6A2E' : 'var(--primary)',
+                  letterSpacing: '0.03em',
+                }}
+              >
+                {formatStopwatch(sessionSeconds)}
+              </span>
+            </div>
           )}
         </div>
 
+        {/* Token pills */}
         {bufferDisplay.length === 0 ? (
           <p style={{ fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', margin: 0 }}>
             Start signing to build a sentence
           </p>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-            {bufferDisplay.map((token, i) => (
-              <span
-                key={`${token}-${i}`}
-                style={{
-                  background: 'var(--primary-dim)',
-                  color: 'var(--primary)',
-                  borderRadius: 'var(--r-pill)',
-                  padding: '3px 10px',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  animation: 'fadeUp 0.15s ease-out',
-                  border: '1px solid rgba(26,77,58,0.15)',
-                }}
-              >
-                {token}
-              </span>
-            ))}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px',
+              marginTop: '8px',
+              minHeight: '40px',
+              alignItems: 'center',
+            }}
+          >
+            {bufferDisplay.map((token, i) => {
+              const isLetter = isLetterToken(token)
+              return (
+                <span
+                  key={`${token}-${i}`}
+                  style={
+                    isLetter
+                      ? {
+                          background: 'rgba(200,169,110,0.10)',
+                          border: '1px solid rgba(200,169,110,0.30)',
+                          color: '#8B6A2E',
+                          fontFamily: 'var(--font-display)',
+                          fontSize: '15px',
+                          padding: '4px 10px',
+                          borderRadius: 'var(--r-md)',
+                          minWidth: '32px',
+                          textAlign: 'center',
+                          animation: 'fadeIn 0.15s ease',
+                          display: 'inline-block',
+                        }
+                      : {
+                          background: 'rgba(26,77,58,0.08)',
+                          border: '1px solid rgba(26,77,58,0.20)',
+                          color: 'var(--primary)',
+                          fontFamily: 'var(--font-ui)',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          padding: '4px 12px',
+                          borderRadius: 'var(--r-md)',
+                          animation: 'fadeIn 0.15s ease',
+                          display: 'inline-block',
+                          letterSpacing: '0.02em',
+                        }
+                  }
+                >
+                  {token}
+                </span>
+              )
+            })}
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: '11px',
+                color: 'var(--text-3)',
+                fontStyle: 'italic',
+                alignSelf: 'flex-end',
+              }}
+            >
+              {bufferDisplay.length} sign{bufferDisplay.length !== 1 ? 's' : ''}
+            </span>
           </div>
         )}
       </div>
 
-      {/* ── Sentence output ───────────────────────────────────────── */}
+      {/* ── Sentence output (3 states) ────────────────────────────── */}
       <div>
         <div
           style={{
@@ -167,110 +276,60 @@ export function SentencePanel({
 
         <div
           style={{
-            background: pendingSentence ? 'rgba(200,169,110,0.06)' : 'var(--surface-2)',
+            background: 'var(--surface-2)',
             border: '1px solid var(--border)',
-            borderLeft: pendingSentence ? '3px solid var(--amber)' : '1px solid var(--border)',
             borderRadius: 'var(--r-md)',
             padding: '14px 16px',
             minHeight: '60px',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            overflow: 'hidden',
+            alignItems: 'center',
+            gap: '12px',
             position: 'relative',
-            transition: 'background 0.2s, border-left 0.2s',
+            overflow: 'hidden',
           }}
         >
           {isProcessing ? (
-            <div
-              className="shimmer"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                borderRadius: 'var(--r-md)',
-                display: 'flex',
-                alignItems: 'center',
-                paddingLeft: '16px',
-              }}
-            >
-              <span style={{ color: 'var(--text-3)', fontSize: '13px', fontStyle: 'italic' }}>
+            // STATE B — Processing
+            <div style={{ flex: 1 }}>
+              <div className="skeleton" style={{ height: '28px', width: '70%' }} />
+              <span
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-3)',
+                  marginTop: '6px',
+                  display: 'block',
+                  fontStyle: 'italic',
+                }}
+              >
                 Building sentence…
               </span>
             </div>
-          ) : pendingSentence ? (
-            /* Pending sentence — about to release */
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                <span
-                  key={pendingSentence}
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: '20px',
-                    fontStyle: 'italic',
-                    color: 'var(--text)',
-                    animation: 'fadeUp 0.25s ease-out',
-                    flex: 1,
-                    letterSpacing: '-0.01em',
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {pendingSentence}
-                </span>
-                <button
-                  onClick={onRelease}
-                  title="Release now"
-                  style={{
-                    flexShrink: 0,
-                    padding: '5px 14px',
-                    borderRadius: 'var(--r-sm)',
-                    background: 'var(--amber)',
-                    color: '#ffffff',
-                    border: 'none',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                  }}
-                >
-                  Release
-                </button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                <div
-                  style={{
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    background: 'var(--amber)',
-                    animation: 'pulse 0.8s ease-in-out infinite',
-                  }}
-                />
-                <span style={{ fontSize: '10px', color: 'var(--amber)', fontWeight: 500 }}>
-                  Releasing…
-                </span>
-              </div>
-            </div>
           ) : currentSentence ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-              <span
+            // STATE C — Released
+            <>
+              <p
                 key={currentSentence}
                 style={{
                   fontFamily: 'var(--font-display)',
-                  fontSize: '20px',
+                  fontSize: '22px',
+                  fontWeight: 400,
                   fontStyle: 'italic',
                   color: 'var(--text)',
-                  animation: 'fadeUp 0.25s ease-out',
-                  flex: 1,
                   letterSpacing: '-0.01em',
-                  lineHeight: 1.3,
+                  lineHeight: 1.4,
+                  flex: 1,
+                  margin: 0,
+                  animation: 'signPop 0.4s cubic-bezier(0.34,1.56,0.64,1)',
                 }}
               >
                 {currentSentence}
-              </span>
+              </p>
               <button
                 onClick={() => onSpeak(currentSentence)}
                 title="Speak"
                 style={{
                   flexShrink: 0,
-                  padding: '5px 14px',
+                  padding: '6px 14px',
                   borderRadius: 'var(--r-sm)',
                   background: 'var(--primary)',
                   color: '#ffffff',
@@ -281,11 +340,46 @@ export function SentencePanel({
               >
                 Speak
               </button>
-            </div>
+            </>
           ) : (
-            <span style={{ color: 'var(--text-3)', fontSize: '13px', fontStyle: 'italic' }}>
-              Sentence will appear here
-            </span>
+            // STATE A — Empty / waiting
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                opacity: 0.7,
+              }}
+            >
+              <div
+                style={{
+                  width: '24px',
+                  height: '2px',
+                  background: 'var(--border)',
+                  borderRadius: 'var(--r-pill)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'linear-gradient(90deg, transparent, var(--amber), transparent)',
+                    animation: 'shimmer 1.5s infinite',
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-3)',
+                  fontStyle: 'italic',
+                }}
+              >
+                {bufferDisplay.length > 0 ? 'Building sentence…' : 'Waiting for signs…'}
+              </span>
+            </div>
           )}
         </div>
       </div>

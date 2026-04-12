@@ -534,11 +534,11 @@ function App() {
             <SentencePanel
               bufferDisplay={sentenceBuilder.bufferDisplay}
               currentSentence={sentenceBuilder.currentSentence}
-              pendingSentence={sentenceBuilder.pendingSentence}
               sentenceHistory={sentenceBuilder.sentenceHistory}
               isProcessing={sentenceBuilder.isProcessing}
+              sessionSeconds={sentenceBuilder.sessionSeconds}
+              isTiming={sentenceBuilder.isTiming}
               onBuild={sentenceBuilder.buildSentence}
-              onRelease={sentenceBuilder.releaseSentence}
               onClear={sentenceBuilder.clearSentences}
               onSpeak={(text) => speak(text, selectedVoiceId)}
               currentGesture={gestureName}
