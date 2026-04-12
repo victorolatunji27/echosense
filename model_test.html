@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EchoSense — Model Verification</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0d1117;
+      color: #c9d1d9;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    h1  { color: #1D9E75; font-size: 1.3rem; margin-bottom: 4px; }
+    h2  { color: #8b949e; font-size: 0.85rem; font-weight: normal; margin-top: 0; }
+    hr  { border: none; border-top: 1px solid #21262d; margin: 24px 0; }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+    .card h3 { margin: 0 0 12px; font-size: 0.95rem; color: #e6edf3; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .status.pending { background:#21262d; color:#8b949e; }
+    .status.ok      { background:#0d2a1f; color:#3fb950; border: 1px solid #238636; }
+    .status.error   { background:#2d0f0f; color:#f85149; border: 1px solid #6e1a1a; }
+    .dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+    .predictions {
+      font-size: 0.82rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .predictions li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .predictions li:last-child { border-bottom: none; }
+    .rank  { color: #8b949e; width: 18px; text-align: right; }
+    .label { color: #e6edf3; width: 90px; }
+    .conf  { color: #1D9E75; width: 52px; text-align: right; }
+    .bar-bg { flex: 1; background: #21262d; border-radius: 3px; height: 6px; }
+    .bar-fill { height: 6px; border-radius: 3px; background: #1D9E75; }
+
+    canvas { display: block; border: 1px solid #21262d; border-radius: 4px; }
+
+    .meta { font-size: 0.75rem; color: #6e7681; margin-top: 10px; }
+
+    #log {
+      background: #010409;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 0.78rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      max-height: 320px;
+      overflow-y: auto;
+      color: #8b949e;
+    }
+    #log .info  { color: #8b949e; }
+    #log .ok    { color: #3fb950; }
+    #log .warn  { color: #d29922; }
+    #log .err   { color: #f85149; }
+    #log .head  { color: #58a6ff; }
+  </style>
+</head>
+<body>
+
+<h1>EchoSense — Model Verification</h1>
+<h2>Confirms both TF.js models load and produce valid outputs before the hackathon.</h2>
+
+<hr>
+
+<!-- ── CNN ───────────────────────────────────────────────────────────────── -->
+<div class="card">
+  <h3>CNN — Static ASL Alphabet (MobileNetV2)</h3>
+  <div id="cnn-status" class="status pending"><span class="dot"></span>Loading…</div>
+  <div style="display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+      <canvas id="test-canvas" width="224" height="224"></canvas>
+      <p class="meta">Test image (224×224) fed to CNN</p>
+    </div>
+    <div style="flex:1; min-width:220px;">
+      <p class="meta" style="margin:0 0 6px;">Top-3 predictions</p>
+      <ul id="cnn-predictions" class="predictions">
+        <li style="color:#6e7681; font-size:0.8rem;">—</li>
+      </ul>
+      <p id="cnn-meta" class="meta"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ── LSTM ──────────────────────────────────────────────────────────────── -->
+<div class="card">
+  <h3>LSTM — Dynamic Gesture Classifier</h3>
+  <div id="lstm-status" class="status pending"><span class="dot"></span>Loading…</div>
+  <p class="meta" style="margin:4px 0 0;">Input: dummy tensor [1, 30, 63] (30 frames × 63 landmarks)</p>
+  <ul id="lstm-predictions" class="predictions" style="margin-top:10px;">
+    <li style="color:#6e7681; font-size:0.8rem;">—</li>
+  </ul>
+  <p id="lstm-meta" class="meta"></p>
+</div>
+
+<!-- ── Console ───────────────────────────────────────────────────────────── -->
+<div class="card">
+  <h3>Console output</h3>
+  <div id="log"></div>
+</div>
+
+<script>
+// ── Label maps ────────────────────────────────────────────────────────────────
+// CNN labels — alphabetically sorted by ImageDataGenerator (matches training)
+const CNN_LABELS = [
+  'A','B','C','D','DELETE',
+  'E','F','G','H','I','J','K','L','M','N','NOTHING',
+  'O','P','Q','R','S','SPACE',
+  'T','U','V','W','X','Y','Z'
+];
+
+// LSTM labels loaded from lstm_class_indices.json; fall back to these defaults
+// if the file doesn't exist yet (model not yet trained).
+const LSTM_LABELS_DEFAULT = [
+  'hello','thank_you','please','sorry','help',
+  'more','finished','want','understand','where',
+  'name','pain','water','eat','friend'
+];
+
+// ── Minimal test image: a 32×32 solid-color PNG encoded in base64 ─────────────
+// Generated with: canvas 32×32, filled #F0A876 (skin-tone from design system).
+// The CNN will still produce a valid softmax output — this just proves the
+// pipeline runs without a real camera frame.
+const TEST_IMAGE_B64 = (function () {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const ctx = c.getContext('2d');
+  // Rough "hand silhouette": skin background + dark palm outline
+  ctx.fillStyle = '#F0A876';
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = '#D4784E';
+  ctx.fillRect(8, 6, 16, 20);       // palm
+  ctx.fillRect(10, 2, 4, 8);        // index
+  ctx.fillRect(15, 1, 4, 9);        // middle
+  ctx.fillRect(20, 3, 4, 8);        // ring
+  ctx.fillStyle = '#E8956D';
+  ctx.fillRect(6, 10, 4, 6);        // thumb
+  return c.toDataURL('image/png');
+})();
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log');
+function log(msg, cls = 'info') {
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = msg + '\n';
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+  // Also mirror to browser devtools console
+  if (cls === 'err') console.error(msg);
+  else if (cls === 'warn') console.warn(msg);
+  else console.log(msg);
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────────
+function setStatus(id, state, label) {
+  const el = document.getElementById(id);
+  el.className = `status ${state}`;
+  el.innerHTML = `<span class="dot"></span>${label}`;
+}
+
+// ── Render prediction bars ────────────────────────────────────────────────────
+function renderPredictions(ulId, preds) {
+  // preds: [{label, conf}] sorted desc
+  const ul = document.getElementById(ulId);
+  ul.innerHTML = '';
+  preds.forEach((p, i) => {
+    const pct = (p.conf * 100).toFixed(1);
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <span class="rank">#${i + 1}</span>
+      <span class="label">${p.label}</span>
+      <span class="conf">${pct}%</span>
+      <span class="bar-bg"><span class="bar-fill" style="width:${pct}%"></span></span>
+    `;
+    ul.appendChild(li);
+  });
+}
+
+// ── Draw test image on canvas ─────────────────────────────────────────────────
+function drawTestImage() {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('test-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 224, 224);
+      resolve(canvas);
+    };
+    img.src = TEST_IMAGE_B64;
+  });
+}
+
+// ── CNN inference ─────────────────────────────────────────────────────────────
+async function runCNN() {
+  log('\n── CNN ─────────────────────────────────────', 'head');
+  log(`Loading model from ./model/saved/tfjs_model/model.json …`);
+
+  let model;
+  try {
+    model = await tf.loadLayersModel('./model/saved/tfjs_model/model.json');
+    log('Model loaded OK', 'ok');
+    log(`Input  shape : ${JSON.stringify(model.inputs[0].shape)}`);
+    log(`Output shape : ${JSON.stringify(model.outputs[0].shape)}`);
+    log(`Params       : ${model.countParams().toLocaleString()}`);
+  } catch (e) {
+    log(`Failed to load CNN: ${e.message}`, 'err');
+    setStatus('cnn-status', 'error', 'CNN load FAILED');
+    document.getElementById('cnn-meta').textContent = e.message;
+    return;
+  }
+
+  // Warmup
+  log('Running warmup pass …');
+  const warmup = tf.zeros([1, 224, 224, 3]);
+  const warmupOut = model.predict(warmup);
+  warmupOut.dispose();
+  warmup.dispose();
+  log('Warmup done');
+
+  // Draw test image
+  const canvas = await drawTestImage();
+  log(`Test image drawn on canvas (224×224)`);
+
+  // Inference
+  log('Running inference on test image …');
+  const t0 = performance.now();
+
+  const tensor = tf.tidy(() => {
+    const pixels = tf.browser.fromPixels(canvas);   // (224,224,3) uint8
+    const float  = pixels.toFloat().div(255.0);      // normalise [0,1]
+    return float.expandDims(0);                      // (1,224,224,3)
+  });
+
+  const output   = model.predict(tensor);
+  const probs    = await output.data();
+  const elapsed  = (performance.now() - t0).toFixed(1);
+
+  tensor.dispose();
+  output.dispose();
+
+  log(`Inference time : ${elapsed} ms`);
+
+  // Top-3
+  const indexed = Array.from(probs).map((p, i) => ({ label: CNN_LABELS[i] ?? `class_${i}`, conf: p }));
+  indexed.sort((a, b) => b.conf - a.conf);
+  const top3 = indexed.slice(0, 3);
+
+  log('\nTop-3 predictions:');
+  top3.forEach((p, i) => log(`  #${i + 1}  ${p.label.padEnd(10)}  ${(p.conf * 100).toFixed(2)}%`));
+
+  // Also log full softmax to console (not in page log to keep it clean)
+  console.log('[CNN] Full softmax output:', Object.fromEntries(indexed.map(p => [p.label, +(p.conf * 100).toFixed(3)])));
+
+  setStatus('cnn-status', 'ok', 'CNN loaded: OK');
+  renderPredictions('cnn-predictions', top3);
+  document.getElementById('cnn-meta').textContent =
+    `Inference: ${elapsed} ms  ·  Output classes: ${probs.length}`;
+
+  log('CNN verification complete ✓', 'ok');
+}
+
+// ── LSTM inference ────────────────────────────────────────────────────────────
+async function runLSTM() {
+  log('\n── LSTM ────────────────────────────────────', 'head');
+  log(`Loading model from ./model/saved/tfjs_lstm/model.json …`);
+
+  let model;
+  try {
+    model = await tf.loadLayersModel('./model/saved/tfjs_lstm/model.json');
+    log('Model loaded OK', 'ok');
+    log(`Input  shape : ${JSON.stringify(model.inputs[0].shape)}`);
+    log(`Output shape : ${JSON.stringify(model.outputs[0].shape)}`);
+    log(`Params       : ${model.countParams().toLocaleString()}`);
+  } catch (e) {
+    log(`Failed to load LSTM: ${e.message}`, 'err');
+    setStatus('lstm-status', 'error', 'LSTM load FAILED');
+    document.getElementById('lstm-meta').textContent = e.message;
+    return;
+  }
+
+  // Try to load class label map
+  let lstmLabels = LSTM_LABELS_DEFAULT;
+  try {
+    const resp = await fetch('./model/saved/lstm_class_indices.json');
+    if (resp.ok) {
+      const map = await resp.json();
+      // map is {label: index} — invert to [label ordered by index]
+      lstmLabels = Object.entries(map)
+        .sort((a, b) => a[1] - b[1])
+        .map(([lbl]) => lbl);
+      log(`Loaded lstm_class_indices.json — ${lstmLabels.length} classes: ${lstmLabels.join(', ')}`);
+    } else {
+      log(`lstm_class_indices.json not found — using default label list`, 'warn');
+    }
+  } catch (_) {
+    log(`Could not fetch lstm_class_indices.json — using defaults`, 'warn');
+  }
+
+  // Dummy input: [1, 30, 63] — random values in [0,1] simulating normalised landmarks
+  log('Creating dummy input tensor [1, 30, 63] …');
+  const nClasses  = model.outputs[0].shape[model.outputs[0].shape.length - 1];
+  const dummyData = Float32Array.from({ length: 1 * 30 * 63 }, () => Math.random());
+  const dummy     = tf.tensor3d(dummyData, [1, 30, 63]);
+
+  log('Running inference …');
+  const t0 = performance.now();
+
+  const output  = model.predict(dummy);
+  const probs   = await output.data();
+  const elapsed = (performance.now() - t0).toFixed(1);
+
+  dummy.dispose();
+  output.dispose();
+
+  log(`Inference time : ${elapsed} ms`);
+
+  const indexed = Array.from(probs).map((p, i) => ({
+    label: lstmLabels[i] ?? `class_${i}`,
+    conf: p
+  }));
+  indexed.sort((a, b) => b.conf - a.conf);
+  const top3 = indexed.slice(0, 3);
+
+  log('\nTop-3 predictions (random input — values are meaningless):');
+  top3.forEach((p, i) => log(`  #${i + 1}  ${p.label.padEnd(14)}  ${(p.conf * 100).toFixed(2)}%`));
+
+  console.log('[LSTM] Full softmax output:', Object.fromEntries(indexed.map(p => [p.label, +(p.conf * 100).toFixed(3)])));
+
+  setStatus('lstm-status', 'ok', 'LSTM loaded: OK');
+  renderPredictions('lstm-predictions', top3);
+  document.getElementById('lstm-meta').textContent =
+    `Inference: ${elapsed} ms  ·  Output classes: ${nClasses}  ·  Input: random (dummy)`;
+
+  log('LSTM verification complete ✓', 'ok');
+}
+
+// ── Run everything ────────────────────────────────────────────────────────────
+(async function main() {
+  log(`TF.js version : ${tf.version.tfjs}`, 'head');
+  log(`Backend       : ${tf.getBackend()}`);
+  log(`Memory        : ${JSON.stringify(tf.memory())}`);
+
+  await runCNN().catch(e => log(`Unhandled CNN error: ${e}`, 'err'));
+  await runLSTM().catch(e => log(`Unhandled LSTM error: ${e}`, 'err'));
+
+  const mem = tf.memory();
+  log(`\nFinal memory — tensors: ${mem.numTensors}  bytes: ${(mem.numBytes / 1024).toFixed(1)} KB`, 'info');
+  if (mem.numTensors > 5) {
+    log(`WARNING: possible tensor leak (${mem.numTensors} tensors unreleased)`, 'warn');
+  }
+})();
+</script>
+</body>
+</html>
