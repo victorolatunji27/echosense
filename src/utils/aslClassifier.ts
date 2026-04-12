@@ -145,6 +145,28 @@ export function classifyASLGesture(lm: Landmark[]): string | null {
     if (lm[8].y > lm[5].y && lm[12].y > lm[9].y) return 'ASL_P'
   }
 
+  // ── ASL_WANT: claw/grab hand ──────────────────────────────────────────────
+  // All four fingers bent (not extended) but fingertips extend outward rather
+  // than curling under into a closed fist.  Distinguishable from fist shapes
+  // (A, S, E, T, N, M) by the average distance of fingertips from the palm base.
+  //
+  // Closed fist: tips curl under and sit close to landmark 0 (wrist).
+  //   avg tip-to-wrist distance ≈ 0.08 – 0.13
+  // Claw/want: tips splay forward and stay far from the wrist.
+  //   avg tip-to-wrist distance ≈ 0.16 – 0.22
+  //
+  // Check fires for any thumb state (WANT is signed with thumb sometimes spread).
+
+  if (!index && !middle && !ring && !pinky) {
+    const avgTipDist = (
+      dist(lm[8],  lm[0]) +
+      dist(lm[12], lm[0]) +
+      dist(lm[16], lm[0]) +
+      dist(lm[20], lm[0])
+    ) / 4
+    if (avgTipDist > 0.16) return 'ASL_WANT'
+  }
+
   // ── All-curled fist variants ──────────────────────────────────────────────
 
   if (!thumb && !index && !middle && !ring && !pinky) {

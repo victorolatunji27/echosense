@@ -359,9 +359,36 @@ export function SentencePanel({
           </button>
         </div>
 
-        <span style={{ fontSize: '10px', color: '#4b5563', textAlign: 'center' }}>
-          or pause 3s to auto-build
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: '#4b5563' }}>
+            or pause 3s to auto-build
+          </span>
+          <span style={{ fontSize: '10px', color: '#374151', textAlign: 'center', lineHeight: 1.5 }}>
+            Spell words letter-by-letter · use{' '}
+            <span style={{
+              background: 'rgba(29,158,117,0.15)',
+              color: '#86efac',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              fontFamily: 'monospace',
+              fontSize: '10px',
+            }}>
+              SPACE
+            </span>
+            {' '}gesture between words ·{' '}
+            <span style={{
+              background: 'rgba(124,58,237,0.15)',
+              color: '#c4b5fd',
+              borderRadius: '4px',
+              padding: '1px 5px',
+              fontFamily: 'monospace',
+              fontSize: '10px',
+            }}>
+              Open_Palm
+            </span>
+            {' '}= PLEASE
+          </span>
+        </div>
       </div>
     </div>
   )

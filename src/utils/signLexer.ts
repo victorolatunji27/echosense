@@ -5,10 +5,12 @@ export type SignToken = {
   timestamp?: number
 }
 
+// Maps gesture keys to their sentence-context English values.
+// Note: Open_Palm maps to PLEASE here (more useful than STOP in sentences).
 const WORD_MAP: Record<string, string> = {
   'Thumb_Up':       'YES',
   'Thumb_Down':     'NO',
-  'Open_Palm':      'STOP',
+  'Open_Palm':      'PLEASE',
   'Closed_Fist':    'WAIT',
   'Victory':        'HELLO',
   'ILoveYou':       'LOVE',
@@ -46,6 +48,13 @@ const WORD_MAP: Record<string, string> = {
   'ASL_THANK':      'THANK',
 }
 
+// Gestures that act as word boundaries — they break letter grouping
+// without producing a token themselves.
+const WORD_BOUNDARY = new Set(['ASL_SPACE'])
+
+// Gestures that delete the last committed token.
+const DELETE_TOKEN = new Set(['ASL_DELETE'])
+
 function isLetter(sign: string): boolean {
   return sign.startsWith('ASL_') && sign.length === 5 &&
     sign[4] >= 'A' && sign[4] <= 'Z'
@@ -62,11 +71,27 @@ export function lexSigns(signs: string[]): SignToken[] {
   while (i < signs.length) {
     const sign = signs[i]
 
-    // LETTER GROUPING — consecutive ASL_A..Z → single WORD token
+    // WORD BOUNDARY — ASL_SPACE ends any active letter/digit run
+    if (WORD_BOUNDARY.has(sign)) {
+      i++
+      continue
+    }
+
+    // DELETE — pop last token (backspace)
+    if (DELETE_TOKEN.has(sign)) {
+      tokens.pop()
+      i++
+      continue
+    }
+
+    // LETTER GROUPING — consecutive ASL_A..Z (with no SPACE between) → WORD token
     if (isLetter(sign)) {
       let word = ''
-      const start = i
-      while (i < signs.length && isLetter(signs[i])) {
+      while (
+        i < signs.length &&
+        isLetter(signs[i]) &&
+        !WORD_BOUNDARY.has(signs[i])
+      ) {
         word += signs[i][4]
         i++
       }
@@ -74,7 +99,7 @@ export function lexSigns(signs: string[]): SignToken[] {
       continue
     }
 
-    // NUMBER GROUPING — consecutive ASL_0..9 → single NUMBER token
+    // NUMBER GROUPING — consecutive ASL_0..9 → NUMBER token
     if (isDigit(sign)) {
       let num = ''
       while (i < signs.length && isDigit(signs[i])) {

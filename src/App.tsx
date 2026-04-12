@@ -138,19 +138,31 @@ function App() {
     }
     prevGestureRef.current = gestureName
 
-    if (
+    // Base commit gate — hold long enough, have a real gesture
+    const canCommit =
       holdCountRef.current >= HOLD_THRESHOLD &&
       gestureName !== null &&
       gestureName !== 'None' &&
+      gestureName !== 'ASL_NOTHING'
+
+    // ── Sentence mode ─────────────────────────────────────────────────────
+    // Intentionally bypasses the displayText dedup check so that:
+    //   • ASL_SPACE (no display text) can commit as a word boundary
+    //   • The same letter can be signed consecutively (double-L in HELLO etc.)
+    if (canCommit && modeRef.current === 'sentence') {
+      sentenceBuilder.addSign(gestureName)
+      holdCountRef.current = 0
+      // Reset to '' so the same gesture can be signed again immediately
+      lastCommittedRef.current = ''
+      return
+    }
+
+    // ── Phrase + Spell modes ──────────────────────────────────────────────
+    if (
+      canCommit &&
       displayText !== lastCommittedRef.current
     ) {
-      if (modeRef.current === 'sentence') {
-        // Sentence mode: feed every committed gesture into the builder
-        sentenceBuilder.addSign(gestureName)
-        holdCountRef.current = 0
-        lastCommittedRef.current = displayText
-        return
-      } else if (modeRef.current === 'spell') {
+      if (modeRef.current === 'spell') {
         // Letter: append to word
         if (/^ASL_[A-Z]$/.test(gestureName)) {
           const letter = GESTURE_MAP[gestureName] ?? ''

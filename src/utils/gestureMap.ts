@@ -52,6 +52,10 @@ export const GESTURE_MAP: Record<string, string> = {
   ASL_MONEY: 'Money',
   ASL_TIME: 'Time',
 
+  // CNN special classes
+  ASL_SPACE: '(space)',
+  ASL_NOTHING: '',
+
   None: '',
 }
 
