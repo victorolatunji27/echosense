@@ -19,10 +19,11 @@ interface Props {
   isLoaded: boolean
   holdProgress: number
   currentLetter: string
+  isLocked?: boolean
   onReady: (video: HTMLVideoElement, canvas: HTMLCanvasElement) => void
 }
 
-export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, currentLetter, onReady }: Props) {
+export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, currentLetter, isLocked, onReady }: Props) {
   const { videoRef, isReady, error } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -86,6 +87,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
 
   const handActive = landmarks !== null
   const progress = arcVisible ? holdProgress : 0
+  const showArc = arcVisible || isLocked
 
   return (
     <div className={`camera-container${handActive ? ' hand-active' : ''}`}>
@@ -170,7 +172,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
           )}
 
           {/* ── Hold progress arc (FIX 2) ──────────────────────────── */}
-          {arcVisible && (
+          {showArc && (
             <div
               style={{
                 position: 'absolute',
@@ -179,7 +181,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
                 transform: 'translateX(-50%)',
                 zIndex: 3,
                 pointerEvents: 'none',
-                opacity: arcOpacity,
+                opacity: isLocked ? 1 : arcOpacity,
                 transition: 'opacity 0.3s ease',
               }}
             >
@@ -188,55 +190,68 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
                 <circle
                   cx="40" cy="40" r={ARC_R}
                   fill="none"
-                  stroke="rgba(255,255,255,0.15)"
+                  stroke={isLocked ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.15)'}
                   strokeWidth="3"
                 />
-                {/* Progress arc */}
+                {/* Progress arc — gray when locked, amber otherwise */}
                 <circle
                   cx="40" cy="40" r={ARC_R}
                   fill="none"
-                  stroke="#C8A96E"
+                  stroke={isLocked ? 'rgba(255,255,255,0.30)' : '#C8A96E'}
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeDasharray={ARC_CIRC}
-                  strokeDashoffset={ARC_CIRC * (1 - progress)}
+                  strokeDashoffset={ARC_CIRC * (1 - (isLocked ? 1 : progress))}
                   transform="rotate(-90 40 40)"
                   style={{ transition: 'stroke-dashoffset 40ms linear' }}
                 />
                 {/* Center content */}
-                {progress > 0 && progress < 1 && (
+                {isLocked ? (
                   <text
                     x="40" y="44"
                     textAnchor="middle"
-                    fontSize="18"
-                    fontFamily="DM Serif Display, Georgia, serif"
-                    fill="white"
-                    fontWeight="400"
+                    fontSize="12"
+                    fontFamily="Inter, system-ui, sans-serif"
+                    fill="rgba(255,255,255,0.7)"
+                    fontWeight="500"
+                    letterSpacing="0.04em"
                   >
-                    {currentLetter || ''}
+                    Wait…
                   </text>
-                )}
-                {progress >= 1 && (
-                  <text
-                    x="40" y="46"
-                    textAnchor="middle"
-                    fontSize="22"
-                    fill="#C8A96E"
-                  >
-                    ✓
-                  </text>
-                )}
-                {/* Outer pulse ring at near-completion */}
-                {progress >= 0.95 && (
-                  <circle
-                    cx="40" cy="40" r="36"
-                    fill="none"
-                    stroke="rgba(200,169,110,0.4)"
-                    strokeWidth="1.5"
-                    style={{
-                      animation: 'pulseRing 0.4s ease-out forwards',
-                    }}
-                  />
+                ) : (
+                  <>
+                    {progress > 0 && progress < 1 && (
+                      <text
+                        x="40" y="44"
+                        textAnchor="middle"
+                        fontSize="18"
+                        fontFamily="DM Serif Display, Georgia, serif"
+                        fill="white"
+                        fontWeight="400"
+                      >
+                        {currentLetter || ''}
+                      </text>
+                    )}
+                    {progress >= 1 && (
+                      <text
+                        x="40" y="46"
+                        textAnchor="middle"
+                        fontSize="22"
+                        fill="#C8A96E"
+                      >
+                        ✓
+                      </text>
+                    )}
+                    {progress >= 0.95 && (
+                      <circle
+                        cx="40" cy="40" r="36"
+                        fill="none"
+                        stroke="rgba(200,169,110,0.4)"
+                        strokeWidth="1.5"
+                        style={{ animation: 'pulseRing 0.4s ease-out forwards' }}
+                      />
+                    )}
+                  </>
                 )}
               </svg>
             </div>

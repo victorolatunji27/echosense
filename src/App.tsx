@@ -6,7 +6,8 @@ import { useCNNClassifier } from './hooks/useCNNClassifier'
 import { useLSTMClassifier } from './hooks/useLSTMClassifier'
 import { useLandmarkBuffer } from './hooks/useLandmarkBuffer'
 import { useSentenceBuilder } from './hooks/useSentenceBuilder'
-import { getDisplayText, GESTURE_MAP } from './utils/gestureMap'
+import { getDisplayText, PHRASE_PRIORITY_MAP, isPhraseGesture } from './utils/gestureMap'
+import { autocorrectWord } from './utils/spellCorrector'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
 import { SentencePanel } from './components/SentencePanel'
@@ -24,6 +25,10 @@ const VOICES = [
   { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella' },
   { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh' },
 ]
+
+// Spell mode timing (FIX 1A)
+const HOLD_FRAMES = 60     // ~2 seconds at 30fps
+const COOLDOWN_FRAMES = 45 // ~1.5 seconds
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -55,13 +60,33 @@ function App() {
   const [sensitivity, setSensitivity] = useState<'fast' | 'medium' | 'slow'>('medium')
   const [selectedVoiceId, setSelectedVoiceId] = useState(VOICES[0].id)
   const [mode, setMode] = useState<'phrase' | 'spell' | 'sentence'>('phrase')
-  const [currentWord, setCurrentWord] = useState('')
   const [showAbout, setShowAbout] = useState(false)
   const [showReference, setShowReference] = useState(false)
   const [holdProgress, setHoldProgress] = useState(0)
+  const [isLockedState, setIsLockedState] = useState(false)
+
+  // ── Spell-mode state (FIX 1A, 1B, 1C) ──────────────────────────────
+  const [isSpellActive, setIsSpellActive] = useState(false)
+  const [currentSpellWord, setCurrentSpellWord] = useState('')
+  const [finalizedSpellWord, setFinalizedSpellWord] = useState('')
+
+  const isSpellActiveRef = useRef(false)
+  const spellHoldCount = useRef(0)
+  const spellCooldown = useRef(0)
+  const spellLastGesture = useRef<string | null>(null)
+  const spellLocked = useRef(false)
+
+  useEffect(() => { isSpellActiveRef.current = isSpellActive }, [isSpellActive])
+
+  // ── TTS toggles (FIX 1E, 2C) ────────────────────────────────────────
+  const [spellTTSEnabled, setSpellTTSEnabled] = useState(false)
+  const [phraseTTSEnabled, setPhraseTTSEnabled] = useState(false)
+  const phraseTTSEnabledRef = useRef(false)
+  const lastSpokenPhrase = useRef('')
+
+  useEffect(() => { phraseTTSEnabledRef.current = phraseTTSEnabled }, [phraseTTSEnabled])
 
   const modeRef = useRef<'phrase' | 'spell' | 'sentence'>('phrase')
-  const currentWordRef = useRef('')
   const showReferenceRef = useRef(false)
   const hadLandmarksRef = useRef(false)
 
@@ -113,8 +138,16 @@ function App() {
     return `${m}m ${sec.toString().padStart(2, '0')}s`
   }
 
+  // Sentence / phrase mode hold threshold (spell has its own)
   const HOLD_THRESHOLD = sensitivity === 'fast' ? 10 : sensitivity === 'slow' ? 30 : 20
-  const displayText = getDisplayText(gestureName)
+
+  // ── Mode-aware display text ────────────────────────────────────────
+  const rawDisplay = getDisplayText(gestureName)
+  const phraseDisplay = gestureName ? (PHRASE_PRIORITY_MAP[gestureName] ?? '') : ''
+  const displayText =
+    mode === 'phrase' ? phraseDisplay :
+    mode === 'spell'  ? (isSpellActive && gestureName && /^ASL_[A-Z]$/.test(gestureName) ? gestureName[4] : '') :
+                        rawDisplay
 
   const holdCountRef = useRef(0)
   const lastCommittedRef = useRef('')
@@ -124,42 +157,97 @@ function App() {
     holdCountRef.current = 0
   }, [sensitivity])
 
-  // ── FIX 1: Hand drop / return detection ────────────────────────────
+  // ── Hand drop / return detection (sentence mode) ───────────────────
   useEffect(() => {
     const hasHand = landmarks !== null
-
     if (!hasHand && hadLandmarksRef.current) {
-      // Hand just dropped
-      if (modeRef.current === 'sentence') {
-        sentenceBuilder.onHandDrop()
-      }
+      if (modeRef.current === 'sentence') sentenceBuilder.onHandDrop()
     }
     if (hasHand && !hadLandmarksRef.current) {
-      // Hand just returned
-      if (modeRef.current === 'sentence') {
-        sentenceBuilder.onHandReturn()
-      }
+      if (modeRef.current === 'sentence') sentenceBuilder.onHandReturn()
     }
     hadLandmarksRef.current = hasHand
   }, [landmarks])
 
-  // ── Gesture commit logic ───────────────────────────────────────────
-  // Depends on both gestureName AND landmarks so it fires every frame
+  // ── Main frame-by-frame gesture loop ───────────────────────────────
   useEffect(() => {
     addFrame(landmarks)
 
+    // Shared hold counter (phrase + sentence modes)
     if (gestureName === prevGestureRef.current && gestureName !== null && gestureName !== 'None') {
       holdCountRef.current += 1
     } else {
       holdCountRef.current = 0
+      // Reset TTS dedup when gesture changes
+      if (gestureName !== prevGestureRef.current) {
+        lastSpokenPhrase.current = ''
+      }
     }
     prevGestureRef.current = gestureName
 
-    // FIX 2: Update hold progress for the arc visualization
-    const progress = (gestureName && gestureName !== 'None' && gestureName !== 'ASL_NOTHING')
-      ? Math.min(holdCountRef.current / HOLD_THRESHOLD, 1)
-      : 0
+    // ── SPELL MODE ─────────────────────────────────────────────────
+    if (modeRef.current === 'spell') {
+      if (!isSpellActiveRef.current) {
+        spellHoldCount.current = 0
+        spellCooldown.current = 0
+        spellLastGesture.current = null
+        spellLocked.current = false
+        setIsLockedState(false)
+        setHoldProgress(0)
+        return
+      }
+
+      // Tick cooldown first
+      if (spellCooldown.current > 0) {
+        spellCooldown.current -= 1
+        spellLocked.current = true
+        setIsLockedState(true)
+        setHoldProgress(0)
+        if (spellCooldown.current === 0) {
+          spellLocked.current = false
+          setIsLockedState(false)
+        }
+        return
+      }
+      spellLocked.current = false
+      setIsLockedState(false)
+
+      const isLetter = !!gestureName && /^ASL_[A-Z]$/.test(gestureName)
+      if (!isLetter || !gestureName) {
+        spellHoldCount.current = 0
+        spellLastGesture.current = null
+        setHoldProgress(0)
+        return
+      }
+
+      // Different gesture than before? Restart count
+      if (gestureName !== spellLastGesture.current) {
+        spellHoldCount.current = 0
+        spellLastGesture.current = gestureName
+        setHoldProgress(0)
+        return
+      }
+
+      spellHoldCount.current += 1
+      setHoldProgress(Math.min(spellHoldCount.current / HOLD_FRAMES, 1))
+
+      if (spellHoldCount.current >= HOLD_FRAMES) {
+        const letter = gestureName[4]
+        setCurrentSpellWord((prev) => prev + letter)
+        spellHoldCount.current = 0
+        spellLastGesture.current = null
+        spellCooldown.current = COOLDOWN_FRAMES
+      }
+      return
+    }
+
+    // ── SENTENCE + PHRASE MODES ────────────────────────────────────
+    const progress =
+      gestureName && gestureName !== 'None' && gestureName !== 'ASL_NOTHING'
+        ? Math.min(holdCountRef.current / HOLD_THRESHOLD, 1)
+        : 0
     setHoldProgress(progress)
+    setIsLockedState(false)
 
     const canCommit =
       holdCountRef.current >= HOLD_THRESHOLD &&
@@ -167,59 +255,34 @@ function App() {
       gestureName !== 'None' &&
       gestureName !== 'ASL_NOTHING'
 
-    // Sentence mode — bypass displayText dedup for space/consecutive letters
+    // Sentence mode — bypass displayText dedup
     if (canCommit && modeRef.current === 'sentence') {
       sentenceBuilder.addSign(gestureName)
-      sentenceBuilder.onHandReturn() // cancel any pending drop timer
+      sentenceBuilder.onHandReturn()
       holdCountRef.current = 0
       lastCommittedRef.current = ''
       return
     }
 
-    // Phrase + Spell modes
-    if (canCommit && displayText !== lastCommittedRef.current) {
-      if (modeRef.current === 'spell') {
-        if (/^ASL_[A-Z]$/.test(gestureName)) {
-          const letter = GESTURE_MAP[gestureName] ?? ''
-          const newWord = currentWordRef.current + letter
-          currentWordRef.current = newWord
-          setCurrentWord(newWord)
-          lastCommittedRef.current = ''
-          holdCountRef.current = 0
-        } else if (gestureName === 'Open_Palm') {
-          if (currentWordRef.current !== '') {
-            addPhrase(currentWordRef.current)
-            speak(currentWordRef.current, selectedVoiceId)
-            setFlashText(currentWordRef.current)
-            setSignCount((c) => c + 1)
-            currentWordRef.current = ''
-            setCurrentWord('')
-          }
-          lastCommittedRef.current = displayText
-          holdCountRef.current = 0
-        } else if (gestureName === 'Closed_Fist') {
-          const newWord = currentWordRef.current.slice(0, -1)
-          currentWordRef.current = newWord
-          setCurrentWord(newWord)
-          lastCommittedRef.current = ''
-          holdCountRef.current = 0
-        } else if (displayText !== '') {
-          addPhrase(displayText)
-          speak(displayText, selectedVoiceId)
-          setFlashText(displayText)
-          setSignCount((c) => c + 1)
-          lastCommittedRef.current = displayText
-          holdCountRef.current = 0
+    // Phrase mode — strict gesture filter (FIX 2A, 2B)
+    if (modeRef.current === 'phrase') {
+      if (!isPhraseGesture(gestureName)) {
+        // Silently ignore letters/digits/unknowns
+        return
+      }
+      const phraseText = PHRASE_PRIORITY_MAP[gestureName!] ?? ''
+      if (!phraseText) return
+
+      if (canCommit && phraseText !== lastCommittedRef.current) {
+        addPhrase(phraseText)
+        if (phraseTTSEnabledRef.current && phraseText !== lastSpokenPhrase.current) {
+          speak(phraseText, selectedVoiceId)
+          lastSpokenPhrase.current = phraseText
         }
-      } else {
-        if (displayText !== '') {
-          addPhrase(displayText)
-          speak(displayText, selectedVoiceId)
-          setFlashText(displayText)
-          setSignCount((c) => c + 1)
-          lastCommittedRef.current = displayText
-          holdCountRef.current = 0
-        }
+        setFlashText(phraseText)
+        setSignCount((c) => c + 1)
+        lastCommittedRef.current = phraseText
+        holdCountRef.current = 0
       }
     }
   }, [gestureName, landmarks])
@@ -234,9 +297,19 @@ function App() {
     modeRef.current = m
     setMode(m)
     holdCountRef.current = 0
-    currentWordRef.current = ''
-    setCurrentWord('')
     lastCommittedRef.current = ''
+    lastSpokenPhrase.current = ''
+
+    // Reset spell state when leaving spell mode
+    if (m !== 'spell') {
+      setIsSpellActive(false)
+      setCurrentSpellWord('')
+      setFinalizedSpellWord('')
+      spellHoldCount.current = 0
+      spellCooldown.current = 0
+      spellLastGesture.current = null
+      spellLocked.current = false
+    }
   }
 
   function resetSession() {
@@ -263,6 +336,51 @@ function App() {
     ;(canvasRef as React.MutableRefObject<HTMLCanvasElement>).current = canvas
   }
 
+  // ── Spell mode actions (FIX 1B, 1C, 1D) ────────────────────────────
+  function onSpellStart() {
+    setIsSpellActive(true)
+    setCurrentSpellWord('')
+    setFinalizedSpellWord('')
+    spellHoldCount.current = 0
+    spellCooldown.current = 0
+    spellLastGesture.current = null
+    spellLocked.current = false
+  }
+
+  async function onSpellEnd() {
+    const raw = currentSpellWord
+    setIsSpellActive(false)
+    spellHoldCount.current = 0
+    spellCooldown.current = 0
+    spellLastGesture.current = null
+    spellLocked.current = false
+
+    if (!raw) return
+
+    try {
+      const corrected = await autocorrectWord(raw)
+      setFinalizedSpellWord(corrected)
+      addPhrase(corrected)
+      setSignCount((c) => c + 1)
+      if (spellTTSEnabled && corrected) {
+        speak(corrected, selectedVoiceId)
+      }
+    } catch (err) {
+      console.error('[spell finalize] autocorrect failed:', err)
+      setFinalizedSpellWord(raw)
+    }
+  }
+
+  function onSpellClear() {
+    setIsSpellActive(false)
+    setCurrentSpellWord('')
+    setFinalizedSpellWord('')
+    spellHoldCount.current = 0
+    spellCooldown.current = 0
+    spellLastGesture.current = null
+    spellLocked.current = false
+  }
+
   // Classifier status
   const classifierStatus =
     cnnClassifier.isAvailable && lstmClassifier.isAvailable
@@ -272,6 +390,12 @@ function App() {
       : lstmClassifier.isAvailable
       ? { text: 'LSTM', color: 'var(--primary)' }
       : { text: 'Geometric', color: 'var(--text-3)' }
+
+  // Arc letter (FIX 4B)
+  const arcLetter =
+    mode === 'spell'
+      ? (spellLastGesture.current && /^ASL_[A-Z]$/.test(spellLastGesture.current) ? spellLastGesture.current[4] : '')
+      : displayText
 
   return (
     <div style={{ background: 'var(--bg)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -293,7 +417,7 @@ function App() {
 
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
 
-      {/* ── Sticky header (FIX 7: 72px, bigger logo) ─────────────── */}
+      {/* ── Sticky header ─────────────────────────────────────────── */}
       <header
         style={{
           position: 'sticky',
@@ -310,7 +434,6 @@ function App() {
           gap: '12px',
         }}
       >
-        {/* Logo (FIX 7) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             <span
@@ -354,7 +477,6 @@ function App() {
           </div>
         </div>
 
-        {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {landmarks !== null && (
             <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 500 }}>
@@ -371,7 +493,6 @@ function App() {
             <span style={{ fontSize: '10px', color: classifierStatus.color }}>{classifierStatus.text}</span>
           </span>
 
-          {/* Mode tabs */}
           <div
             style={{
               display: 'flex',
@@ -420,7 +541,6 @@ function App() {
             ASL Guide
           </button>
 
-          {/* Speed */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Speed
@@ -510,7 +630,6 @@ function App() {
         </div>
       )}
 
-      {/* Main (FIX 6: tighter padding) */}
       <main
         style={{
           flex: 1,
@@ -526,7 +645,8 @@ function App() {
             gestureName={gestureName}
             isLoaded={isLoaded}
             holdProgress={holdProgress}
-            currentLetter={displayText}
+            currentLetter={arcLetter}
+            isLocked={isLockedState}
             onReady={onReady}
           />
 
@@ -542,7 +662,7 @@ function App() {
               onClear={sentenceBuilder.clearSentences}
               onSpeak={(text) => speak(text, selectedVoiceId)}
               currentGesture={gestureName}
-              displayText={displayText}
+              displayText={rawDisplay}
             />
           ) : (
             <OutputPanel
@@ -553,14 +673,24 @@ function App() {
               isSpeaking={isSpeaking}
               copied={copied}
               mode={mode}
-              currentWord={currentWord}
               voices={VOICES}
               selectedVoiceId={selectedVoiceId}
               onVoiceChange={setSelectedVoiceId}
               onCopy={onCopy}
               onShare={handleShare}
-              onClear={() => { clearTranscript(); resetSession(); clearBuffer() }}
+              onClear={() => { clearTranscript(); resetSession(); clearBuffer(); onSpellClear() }}
               onOpenReference={() => setShowReference(true)}
+              phraseTTSEnabled={phraseTTSEnabled}
+              onPhraseTTSChange={setPhraseTTSEnabled}
+              isSpellActive={isSpellActive}
+              currentSpellWord={currentSpellWord}
+              finalizedSpellWord={finalizedSpellWord}
+              spellLocked={isLockedState && mode === 'spell'}
+              spellTTSEnabled={spellTTSEnabled}
+              onSpellTTSChange={setSpellTTSEnabled}
+              onSpellStart={onSpellStart}
+              onSpellEnd={onSpellEnd}
+              onSpellClear={onSpellClear}
             />
           )}
         </div>

@@ -64,6 +64,66 @@ export function getDisplayText(gestureName: string | null): string {
   return GESTURE_MAP[gestureName] ?? ''
 }
 
+/**
+ * Strict map of gestures that the Phrase panel treats as whole words.
+ * Any gesture NOT in this map (single letters, digits, etc.) is ignored
+ * by Phrase mode entirely — it will not display or commit.
+ */
+export const PHRASE_PRIORITY_MAP: Record<string, string> = {
+  // MediaPipe built-ins — always treated as whole words in phrase mode
+  Victory:       'Hello',
+  ILoveYou:      'I love you',
+  Thumb_Up:      'Yes',
+  Thumb_Down:    'No',
+  Open_Palm:     'Stop',
+  Closed_Fist:   'Wait',
+  Pointing_Up:   'One moment',
+
+  // Custom word gestures
+  ASL_PLEASE:    'Please',
+  ASL_THANKYOU:  'Thank you',
+  ASL_SORRY:     'Sorry',
+  ASL_HELP:      'Help',
+  ASL_MORE:      'More',
+  ASL_FINISHED:  'Finished',
+  ASL_WANT:      'Want',
+  ASL_UNDERSTAND:'Understand',
+  ASL_WHERE:     'Where',
+  ASL_NAME:      'Name',
+  ASL_PAIN:      'Pain',
+  ASL_WATER:     'Water',
+  ASL_EAT:       'Eat',
+  ASL_FRIEND:    'Friend',
+  ASL_BATHROOM:  'Bathroom',
+  ASL_FOOD:      'Food',
+  ASL_YES:       'Yes',
+  ASL_NO:        'No',
+  ASL_WHAT:      'What',
+  ASL_WHO:       'Who',
+  ASL_WHEN:      'When',
+  ASL_HOW:       'How',
+  ASL_SICK:      'Sick',
+  ASL_GOOD:      'Good',
+  ASL_BAD:       'Bad',
+  ASL_WORK:      'Work',
+  ASL_HOME:      'Home',
+  ASL_SCHOOL:    'School',
+  ASL_MONEY:     'Money',
+  ASL_TIME:      'Time',
+}
+
+/** Returns true if the gesture is eligible to commit in Phrase mode. */
+export function isPhraseGesture(key: string | null): boolean {
+  if (!key) return false
+  if (key === 'None' || key === 'ASL_NOTHING') return false
+  // Reject single ASL letters
+  if (key.startsWith('ASL_') && key.length === 5 && key[4] >= 'A' && key[4] <= 'Z') return false
+  // Reject ASL numbers
+  if (key.startsWith('ASL_') && key.length === 5 && key[4] >= '0' && key[4] <= '9') return false
+  // Accept only if in priority map
+  return key in PHRASE_PRIORITY_MAP
+}
+
 export const VOCABULARY_SECTIONS: Array<{
   section: string
   entries: Array<{ key: string; label: string }>

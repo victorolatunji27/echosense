@@ -1,7 +1,74 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ParsedPhrase } from './signParser'
 
-// ── Fallback maps ─────────────────────────────────────────────────────
+// ── FAST_MAP — instant responses for common single/double signs ─────
+const FAST_MAP: Record<string, string> = {
+  'LOVE':             'I love you.',
+  'HELLO':            'Hello!',
+  'THANK_YOU':        'Thank you!',
+  'SORRY':            'I am sorry.',
+  'YES':              'Yes.',
+  'NO':               'No.',
+  'HELP':             'I need help.',
+  'WATER':            'I need water.',
+  'EAT':              'I want to eat.',
+  'PAIN':             'I am in pain.',
+  'FINISHED':         'I am finished.',
+  'MORE':             'I want more.',
+  'UNDERSTAND':       'I understand.',
+  'STOP':             'Stop.',
+  'WAIT':             'Please wait.',
+  'BATHROOM':         'I need the bathroom.',
+  'FRIEND':           'Hello, friend.',
+  'NAME':             'What is your name?',
+  'WHERE':            'Where?',
+  'PLEASE':           'Please.',
+  'MOMENT':           'One moment.',
+  // Two-sign combos
+  'LOVE FRIEND':      'I love you, friend.',
+  'THANK_YOU FRIEND': 'Thank you, my friend.',
+  'HELLO FRIEND':     'Hello, my friend!',
+  'HELP PLEASE':      'Please help me.',
+  'WATER PLEASE':     'Water, please.',
+  'WATER WANT':       'I want water.',
+  'EAT WANT':         'I want to eat.',
+  'MORE PLEASE':      'More, please.',
+  'SORRY PLEASE':     'I am sorry, please forgive me.',
+  'UNDERSTAND NO':    'I do not understand.',
+  'EAT FINISHED':     'I am done eating.',
+  'WANT MORE':        'I want more.',
+  'PAIN HELP':        'I am in pain, please help.',
+  'NAME WHAT':        'What is your name?',
+  'WHERE BATHROOM':   'Where is the bathroom?',
+}
+
+// ── EXPANSION_MAP — semantic expansion for the LLM prompt ───────────
+const EXPANSION_MAP: Record<string, string> = {
+  'YES':          'affirmative / yes',
+  'NO':           'negative / no',
+  'HELLO':        'greeting / hello',
+  'LOVE':         'I love you',
+  'STOP':         'stop / halt',
+  'WAIT':         'wait / one moment',
+  'MOMENT':       'one moment / just a second',
+  'PLEASE':       'please (polite request)',
+  'THANK_YOU':    'thank you / thanks',
+  'SORRY':        'I am sorry / apologies',
+  'HELP':         'I need help / please help me',
+  'MORE':         'I want more / give me more',
+  'FINISHED':     'I am finished / all done',
+  'WANT':         'I want / I need',
+  'UNDERSTAND':   'I understand / I get it',
+  'WHERE':        'where is / where are',
+  'NAME':         'what is your name / my name',
+  'PAIN':         'I am in pain / it hurts',
+  'WATER':        'I need water / water please',
+  'EAT':          'I want to eat / food please',
+  'FRIEND':       'my friend / a friend',
+  'BATHROOM':     'I need the bathroom',
+}
+
+// ── Fallback helpers ────────────────────────────────────────────────
 const SINGLE_TOKEN: Record<string, string> = {
   'HELLO':      'Hello!',
   'HI':         'Hi!',
@@ -62,13 +129,13 @@ function titleCaseWord(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()
 }
 
-// ── Rule-based fallback (offline / API failure path) ────────────────
+// ── Rule-based fallback ─────────────────────────────────────────────
 function buildFallbackSentence(parsed: ParsedPhrase): string {
   const { aslTokens, detectedPattern, isQuestion, isNegated } = parsed
 
-  if (aslTokens.length === 0) return ''
+  if (aslTokens.length === 0) return 'Yes.'
 
-  // FAILSAFE 4 — single token
+  // Single token
   if (aslTokens.length === 1) {
     const t = aslTokens[0]
     if (SINGLE_TOKEN[t]) return SINGLE_TOKEN[t]
@@ -76,33 +143,28 @@ function buildFallbackSentence(parsed: ParsedPhrase): string {
     return titleCaseWord(t) + '.'
   }
 
-  // FAILSAFE 2 + 6 — all single letters (spelling)
+  // All letters (spelling)
   const allLetters = aslTokens.every((t) => t.length === 1)
   if (allLetters) {
     const word = aslTokens.join('')
-    // 2-letter common words
     const lower = word.toLowerCase()
     if (lower === 'hi') return 'Hi!'
     if (lower === 'ok') return 'Okay.'
     if (lower === 'no') return 'No.'
-    // Looks like initials (3+ letters, all uppercase abbreviation)
     if (word.length >= 2 && word.length <= 4) {
-      // Try as-name: "John" if it looks pronounceable, else as initials
       return `My name is ${titleCaseWord(word)}.`
     }
     return `${titleCaseWord(word)}.`
   }
 
-  // FAILSAFE 3 — negation (use last polarity)
+  // Negation
   if (detectedPattern === 'negation' || isNegated) {
     const verb = aslTokens.find((t) => NEG_VERB[t])
-    if (verb) {
-      return `I don't ${NEG_VERB[verb]}.`
-    }
+    if (verb) return `I don't ${NEG_VERB[verb]}.`
     return 'No.'
   }
 
-  // Topic-comment pattern
+  // Topic-comment
   if (detectedPattern === 'topic-comment') {
     const topic = aslTokens[0]
     const comment = aslTokens[1] || ''
@@ -114,9 +176,7 @@ function buildFallbackSentence(parsed: ParsedPhrase): string {
   // Question
   if (isQuestion || detectedPattern === 'question') {
     const loc = aslTokens.find((t) => NOUN_TO_NL[t])
-    if (loc) {
-      return `Where is ${NOUN_TO_NL[loc]}?`
-    }
+    if (loc) return `Where is ${NOUN_TO_NL[loc]}?`
     if (aslTokens.includes('NAME')) return 'What is your name?'
     if (aslTokens.includes('WHAT')) return 'What?'
     if (aslTokens.includes('WHO')) return 'Who?'
@@ -125,7 +185,7 @@ function buildFallbackSentence(parsed: ParsedPhrase): string {
     return aslTokens.map(titleCaseWord).join(' ') + '?'
   }
 
-  // Verb-object pattern
+  // Verb-object
   if (detectedPattern === 'verb-object') {
     const verb = aslTokens.find((t) => VERB_TO_NL[t]) ?? aslTokens[0]
     const noun = aslTokens.find((t) => NOUN_TO_NL[t]) ?? aslTokens[1]
@@ -140,7 +200,7 @@ function buildFallbackSentence(parsed: ParsedPhrase): string {
     if (greeting) return SINGLE_TOKEN[greeting]
   }
 
-  // FAILSAFE 5 — unknown / mixed: incorporate all concepts
+  // Unknown / mixed
   const meaningful = aslTokens.filter((t) => t !== 'YES' && t !== 'NO')
   if (meaningful.length === 0) return 'Yes.'
 
@@ -155,64 +215,77 @@ function buildFallbackSentence(parsed: ParsedPhrase): string {
   return `I need ${parts.join(', ')}, and ${last}.`
 }
 
-// ── Prompt builder ───────────────────────────────────────────────────
+// ── Grammar validation ──────────────────────────────────────────────
+function isValidSentence(s: string): boolean {
+  if (!s || s.length < 2) return false
+  const trimmed = s.trim()
+  // Must end with punctuation
+  if (!/[.!?]$/.test(trimmed)) return false
+  // Must start with capital letter
+  if (!/^[A-Z]/.test(trimmed)) return false
+  // Must not contain raw gesture key names
+  if (/ASL_|GESTURE_|_MAP/.test(trimmed)) return false
+  // Reject single-word fragments unless they are approved short responses
+  const words = trimmed.split(/\s+/)
+  const SHORT_OK = new Set(['Hello!', 'Hi!', 'Yes.', 'No.', 'Stop.', 'Wait.', 'Where?', 'What?', 'Who?', 'When?', 'How?'])
+  if (words.length === 1 && !SHORT_OK.has(trimmed)) return false
+  // Reject nonsense / refusal
+  const lower = trimmed.toLowerCase()
+  if (lower.includes("don't know") || lower.includes('unclear') || lower.includes('cannot determine')) return false
+  return true
+}
+
+// ── Prompt ──────────────────────────────────────────────────────────
 function buildPrompt(parsed: ParsedPhrase): string {
+  const expanded = parsed.aslTokens.map((t) => EXPANSION_MAP[t] || t)
+  const numbered = parsed.aslTokens
+    .map((t, i) => `${i + 1}. ${t} = "${expanded[i]}"`)
+    .join('\n')
+
   return `You are an expert ASL-to-English sentence evaluator.
 
-## Your job
-Convert the following ASL sign sequence into a single, grammatically correct English sentence.
+## Input signs (in ASL order, with full meanings)
+${numbered}
 
-## ASL input (in ASL word order)
-Signs: ${parsed.aslTokens.join(' → ')}
-ASL structure: ${parsed.aslStructure}
+## Context
 Pattern: ${parsed.detectedPattern}
-Confidence: ${parsed.confidence}
 Is question: ${parsed.isQuestion}
 Is negated: ${parsed.isNegated}
 
-## ASL grammar rules you must apply
-1. ASL uses topic-comment structure — the object often comes BEFORE the verb. "WATER WANT" in ASL = "I want water" in English.
-2. ASL drops pronouns (I, me, my, you, the, a). Infer and add them in English.
-3. ASL negation comes AFTER the verb. "EAT NO" = "I don't want to eat."
-4. ASL questions put the WH-word at the END. "BATHROOM WHERE" = "Where is the bathroom?"
-5. Consecutive single letters are fingerspelled words — read them as a word if they form one, or as an abbreviation/name if they don't.
+## Critical rules
+1. ALWAYS output a complete, grammatically correct English sentence. Never output fragments.
+2. "LOVE" or "ILoveYou" sign ALWAYS becomes "I love you." — never just "love".
+3. Single greeting signs become complete sentences:
+   "HELLO" → "Hello!" not just "Hello"
+   "THANK_YOU" → "Thank you!"
+   "SORRY" → "I am sorry."
+4. Expand all ASL topic-comment to English SVO:
+   "WATER WANT" → "I want water."
+   "EAT FINISHED" → "I am done eating."
+5. Add pronouns (I, you, my, we) that ASL omits.
+6. Negation after verb becomes "don't/doesn't":
+   "UNDERSTAND NO" → "I don't understand."
+7. Multiple signs form ONE coherent sentence. Do not output multiple sentences for one input.
+8. If signs seem contradictory or random, find the most charitable single-sentence interpretation that uses ALL the concepts.
+9. Always end with correct punctuation (. or ?).
+10. Maximum 15 words.
 
-## Failsafe rules (ALWAYS apply these)
-
-FAILSAFE 1 — Unknown combination:
-If the token sequence doesn't match a known ASL pattern and you can't determine meaning, output the most charitable interpretation as a simple list sentence.
-Example: "PAIN FRIEND WATER" → "My friend is in pain and needs water."
-
-FAILSAFE 2 — Single letter sequence:
-If all tokens are single letters, try to read them as a spelled word first. If they don't spell a word, treat each as an initial or part of a name.
-Example: "H I" → "Hi!"  ·  "J O H N" → "My name is John."
-
-FAILSAFE 3 — Contradictory negation:
-If the sentence has both YES and NO, use the LAST token's polarity to determine meaning.
-
-FAILSAFE 4 — Too few tokens:
-If there is only 1 token, generate the simplest possible sentence.
-Examples: "WATER" → "I need water."  ·  "HELP" → "I need help."  ·  "HELLO" → "Hello!"
-
-FAILSAFE 5 — Nonsensical combination:
-If combining the words literally makes no logical sense, find the most semantically related grouping and produce a sentence that uses ALL the concepts even if loosely.
-
-FAILSAFE 6 — Letters that don't form a word:
-Treat as a proper noun (name) or abbreviation and incorporate naturally.
-Example: "N Y C" → "I need to go to NYC."
-
-## Output rules
-- Output ONLY the final English sentence.
-- No explanation, no alternatives, no preamble.
-- Always grammatically correct English.
-- Maximum 20 words.
-- Never output "I don't know" or "unclear" — always produce a sentence using the failsafes.
-- First person ("I") unless context clearly implies second person ("you").
-- End with . or ?`
+## Output
+Return ONLY the final English sentence.
+No explanation. No alternatives. No quotation marks. Just the sentence.`
 }
 
 // ── Public API ───────────────────────────────────────────────────────
 export async function evaluateToSentence(parsed: ParsedPhrase): Promise<string> {
+  if (parsed.aslTokens.length === 0) return ''
+
+  // FAST PATH — common cases never hit the LLM
+  const forwardKey = parsed.aslTokens.join(' ')
+  if (FAST_MAP[forwardKey]) return FAST_MAP[forwardKey]
+
+  const reverseKey = [...parsed.aslTokens].reverse().join(' ')
+  if (FAST_MAP[reverseKey]) return FAST_MAP[reverseKey]
+
   const apiKey = (import.meta as Record<string, unknown> & { env: Record<string, string> }).env
     .VITE_ANTHROPIC_KEY
 
@@ -235,23 +308,22 @@ export async function evaluateToSentence(parsed: ParsedPhrase): Promise<string> 
       .map((b) => b.text)
       .join('')
       .trim()
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .trim()
 
-    // Validate — must be a non-empty sentence with real content
-    if (!text || text.length < 2) {
-      return buildFallbackSentence(parsed)
-    }
-
-    // Reject phrases the failsafe is supposed to prevent
-    const lower = text.toLowerCase()
-    if (lower.includes("don't know") || lower.includes('unclear') || lower.includes('cannot')) {
-      return buildFallbackSentence(parsed)
-    }
+    if (!text) return buildFallbackSentence(parsed)
 
     // Capitalize first letter, ensure terminal punctuation
-    const cleaned = text.charAt(0).toUpperCase() + text.slice(1)
+    let cleaned = text.charAt(0).toUpperCase() + text.slice(1)
     if (!/[.!?]$/.test(cleaned)) {
-      return cleaned + (parsed.isQuestion ? '?' : '.')
+      cleaned = cleaned + (parsed.isQuestion ? '?' : '.')
     }
+
+    // Validate — if it's a fragment or contains raw keys, fall back
+    if (!isValidSentence(cleaned)) {
+      return buildFallbackSentence(parsed)
+    }
+
     return cleaned
   } catch (err) {
     console.error('[SentenceEvaluator] API error — using fallback:', err)

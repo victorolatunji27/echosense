@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TTSToggle } from './TTSToggle'
 
 const QUICK_RESPONSES = [
   { key: 'Thumb_Up',    label: 'Yes' },
@@ -18,7 +19,6 @@ interface Props {
   isSpeaking: boolean
   copied: boolean
   mode: 'phrase' | 'spell'
-  currentWord: string
   voices: Array<{ id: string; name: string }>
   selectedVoiceId: string
   onVoiceChange: (id: string) => void
@@ -26,6 +26,21 @@ interface Props {
   onClear: () => void
   onShare: () => void
   onOpenReference?: () => void
+
+  // Phrase mode (FIX 2C)
+  phraseTTSEnabled: boolean
+  onPhraseTTSChange: (v: boolean) => void
+
+  // Spell mode (FIX 1C, 1D, 1E)
+  isSpellActive: boolean
+  currentSpellWord: string
+  finalizedSpellWord: string
+  spellLocked: boolean
+  spellTTSEnabled: boolean
+  onSpellTTSChange: (v: boolean) => void
+  onSpellStart: () => void
+  onSpellEnd: () => void
+  onSpellClear: () => void
 }
 
 export function OutputPanel({
@@ -36,7 +51,6 @@ export function OutputPanel({
   isSpeaking,
   copied,
   mode,
-  currentWord,
   voices,
   selectedVoiceId,
   onVoiceChange,
@@ -44,9 +58,27 @@ export function OutputPanel({
   onClear,
   onShare,
   onOpenReference,
+  phraseTTSEnabled,
+  onPhraseTTSChange,
+  isSpellActive,
+  currentSpellWord,
+  finalizedSpellWord,
+  spellLocked,
+  spellTTSEnabled,
+  onSpellTTSChange,
+  onSpellStart,
+  onSpellEnd,
+  onSpellClear,
 }: Props) {
   const [refOpen, setRefOpen] = useState(false)
   const [shared, setShared] = useState(false)
+
+  // In phrase mode, the displayText may be empty (letter being held).
+  // Show a waiting state in that case.
+  const showWaitingForPhrase = mode === 'phrase' && !displayText
+  const heroText = mode === 'spell' && !isSpellActive
+    ? ''
+    : displayText
 
   return (
     <div
@@ -73,12 +105,25 @@ export function OutputPanel({
           Now detecting
         </div>
 
-        <div
-          key={displayText}
-          className="sign-hero animating"
-        >
-          {displayText || '\u00A0'}
-        </div>
+        {showWaitingForPhrase ? (
+          <div
+            style={{
+              fontFamily: 'var(--font-ui)',
+              fontSize: '18px',
+              fontStyle: 'italic',
+              color: 'var(--text-3)',
+              minHeight: '92px',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            Waiting for phrase gesture…
+          </div>
+        ) : (
+          <div key={heroText} className="sign-hero animating">
+            {heroText || '\u00A0'}
+          </div>
+        )}
 
         {/* Confidence bar */}
         <div
@@ -102,44 +147,220 @@ export function OutputPanel({
           />
         </div>
 
-        {/* Gesture key / definition */}
         <div style={{ fontSize: '13px', color: 'var(--text-3)', marginTop: '5px' }}>
           {currentGesture ?? ''}
         </div>
+      </div>
 
-        {/* Spell-mode word builder */}
-        {mode === 'spell' && currentWord !== '' && (
-          <div
-            style={{
-              marginTop: '12px',
-              padding: '10px 14px',
-              background: 'var(--surface-2)',
-              borderRadius: 'var(--r-md)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <div style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
-              Building word
-            </div>
-            <span
-              className="word-cursor"
+      {/* ── SPELL MODE UI ────────────────────────────────────────── */}
+      {mode === 'spell' && (
+        <div style={{ marginBottom: '20px' }}>
+          {/* State: inactive, no finalized word → Start button */}
+          {!isSpellActive && !finalizedSpellWord && (
+            <button
+              onClick={onSpellStart}
               style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: '22px',
-                fontStyle: 'italic',
-                color: 'var(--primary)',
+                width: '100%',
+                padding: '14px',
+                borderRadius: 'var(--r-md)',
+                background: 'var(--primary)',
+                color: '#ffffff',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: 500,
+                letterSpacing: '0.02em',
               }}
             >
-              {currentWord}
-            </span>
-          </div>
-        )}
-        {mode === 'spell' && currentWord === '' && (
-          <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-3)', fontStyle: 'italic' }}>
-            Spell mode: sign letters · Open Palm to commit word
-          </div>
-        )}
-      </div>
+              Start spelling
+            </button>
+          )}
+
+          {/* State: active → building word box + finalize button */}
+          {isSpellActive && (
+            <>
+              <div
+                style={{
+                  padding: '20px',
+                  background: 'var(--surface-2)',
+                  border: '2px solid var(--primary)',
+                  borderRadius: 'var(--r-lg)',
+                  minHeight: '96px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'relative',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '12px',
+                    fontSize: '10px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.09em',
+                    color: 'var(--primary)',
+                    fontWeight: 500,
+                  }}
+                >
+                  Building word
+                </span>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '4px',
+                    flexWrap: 'wrap',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    paddingTop: '18px',
+                  }}
+                >
+                  {currentSpellWord.split('').map((letter, i) => (
+                    <span
+                      key={`${letter}-${i}`}
+                      style={{
+                        fontFamily: 'var(--font-display)',
+                        fontSize: '36px',
+                        fontStyle: 'italic',
+                        color: 'var(--primary)',
+                        animation: 'signPop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+                        display: 'inline-block',
+                        lineHeight: 1,
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {letter}
+                    </span>
+                  ))}
+                  {currentSpellWord.length === 0 && (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-display)',
+                        fontSize: '36px',
+                        fontStyle: 'italic',
+                        color: 'var(--border-2)',
+                        animation: 'blink 1s step-end infinite',
+                      }}
+                    >
+                      _
+                    </span>
+                  )}
+                </div>
+
+                {spellLocked && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '8px',
+                      right: '12px',
+                      fontSize: '11px',
+                      color: 'var(--amber)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Hold…
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={onSpellEnd}
+                disabled={currentSpellWord.length === 0}
+                style={{
+                  width: '100%',
+                  marginTop: '10px',
+                  padding: '10px 16px',
+                  borderRadius: 'var(--r-md)',
+                  background: 'transparent',
+                  color: currentSpellWord.length === 0 ? 'var(--border-2)' : 'var(--primary)',
+                  border: `1px solid ${currentSpellWord.length === 0 ? 'var(--border)' : 'var(--primary)'}`,
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: currentSpellWord.length === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Finalize word
+              </button>
+            </>
+          )}
+
+          {/* State: inactive, has finalized word → show + Start/Clear */}
+          {!isSpellActive && finalizedSpellWord && (
+            <>
+              <div
+                style={{
+                  padding: '22px',
+                  background: 'rgba(26,77,58,0.04)',
+                  border: '1px solid var(--primary)',
+                  borderRadius: 'var(--r-lg)',
+                  textAlign: 'center',
+                }}
+              >
+                <span
+                  style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '10px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.09em',
+                    color: 'var(--primary)',
+                    fontWeight: 500,
+                  }}
+                >
+                  Word
+                </span>
+                <span
+                  key={finalizedSpellWord}
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: '44px',
+                    fontStyle: 'italic',
+                    color: 'var(--text)',
+                    letterSpacing: '-0.02em',
+                    animation: 'signPop 0.4s cubic-bezier(0.34,1.56,0.64,1)',
+                    display: 'inline-block',
+                    lineHeight: 1,
+                  }}
+                >
+                  {finalizedSpellWord}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button
+                  onClick={onSpellStart}
+                  style={{
+                    flex: 1,
+                    padding: '10px 16px',
+                    borderRadius: 'var(--r-md)',
+                    background: 'var(--primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                  }}
+                >
+                  Spell another word
+                </button>
+                <button
+                  onClick={onSpellClear}
+                  style={{
+                    padding: '10px 16px',
+                    borderRadius: 'var(--r-md)',
+                    background: 'transparent',
+                    color: 'var(--text-3)',
+                    border: '1px solid var(--border)',
+                    fontSize: '13px',
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Transcript ────────────────────────────────────────────── */}
       <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
@@ -158,7 +379,9 @@ export function OutputPanel({
 
         {transcript.length === 0 ? (
           <div style={{ fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', lineHeight: 1.6 }}>
-            Try signing: thumbs up = Yes · peace sign = Hello · or switch to Spell mode to build words letter by letter
+            {mode === 'phrase'
+              ? 'Try signing: thumbs up = Yes · peace sign = Hello'
+              : 'Start spelling to build words letter by letter'}
           </div>
         ) : (
           <div>
@@ -230,43 +453,59 @@ export function OutputPanel({
           borderTop: '1px solid var(--border)',
           paddingTop: '12px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '8px',
-          flexWrap: 'wrap',
+          flexDirection: 'column',
+          gap: '10px',
         }}
       >
-        {/* Voice + speaking */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Voice</span>
-          <select
-            value={selectedVoiceId}
-            onChange={(e) => onVoiceChange(e.target.value)}
-            style={{
-              fontSize: '11px',
-              color: 'var(--text-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--r-sm)',
-              padding: '2px 7px',
-              background: 'var(--surface-2)',
-              cursor: 'pointer',
-              outline: 'none',
-            }}
-          >
-            {voices.map((v) => (
-              <option key={v.id} value={v.id}>{v.name}</option>
-            ))}
-          </select>
-          {isSpeaking && (
-            <span style={{ fontSize: '11px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--primary)', display: 'inline-block', animation: 'pulse 1s ease-in-out infinite' }} />
-              Speaking
-            </span>
+        {/* Row 1: voice + TTS toggle + speaking indicator */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Voice</span>
+            <select
+              value={selectedVoiceId}
+              onChange={(e) => onVoiceChange(e.target.value)}
+              style={{
+                fontSize: '11px',
+                color: 'var(--text-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-sm)',
+                padding: '2px 7px',
+                background: 'var(--surface-2)',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+            {isSpeaking && (
+              <span style={{ fontSize: '11px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--primary)', display: 'inline-block', animation: 'pulse 1s ease-in-out infinite' }} />
+                Speaking
+              </span>
+            )}
+          </div>
+
+          {/* TTS toggle — mode-specific */}
+          {mode === 'phrase' && (
+            <TTSToggle enabled={phraseTTSEnabled} onChange={onPhraseTTSChange} />
+          )}
+          {mode === 'spell' && (
+            <TTSToggle enabled={spellTTSEnabled} onChange={onSpellTTSChange} />
           )}
         </div>
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+        {/* Row 2: actions */}
+        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {[
             { label: refOpen ? 'Guide ▴' : 'Guide ▾', action: () => setRefOpen((o) => !o) },
             { label: copied ? 'Copied!' : 'Copy', action: onCopy },
