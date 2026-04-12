@@ -5,9 +5,11 @@ import { useTTS } from './hooks/useTTS'
 import { useCNNClassifier } from './hooks/useCNNClassifier'
 import { useLSTMClassifier } from './hooks/useLSTMClassifier'
 import { useLandmarkBuffer } from './hooks/useLandmarkBuffer'
+import { useSentenceBuilder } from './hooks/useSentenceBuilder'
 import { getDisplayText, GESTURE_MAP } from './utils/gestureMap'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
+import { SentencePanel } from './components/SentencePanel'
 import { GestureFlash } from './components/GestureFlash'
 import { PracticeMode } from './components/PracticeMode'
 import { ReferenceSheet } from './components/ReferenceSheet'
@@ -39,6 +41,7 @@ function App() {
   })
   const { transcript, addPhrase, clearTranscript } = useTranscript()
   const { speak, isSpeaking } = useTTS(ELEVENLABS_KEY)
+  const sentenceBuilder = useSentenceBuilder()
 
   const [copied, setCopied] = useState(false)
   const [flashText, setFlashText] = useState<string | null>(null)
@@ -48,13 +51,13 @@ function App() {
   const [signCount, setSignCount] = useState(0)
   const [sensitivity, setSensitivity] = useState<'fast' | 'medium' | 'slow'>('medium')
   const [selectedVoiceId, setSelectedVoiceId] = useState(VOICES[0].id)
-  const [mode, setMode] = useState<'phrase' | 'spell'>('phrase')
+  const [mode, setMode] = useState<'phrase' | 'spell' | 'sentence'>('phrase')
   const [currentWord, setCurrentWord] = useState('')
   const [showAbout, setShowAbout] = useState(false)
   const [showReference, setShowReference] = useState(false)
 
   // Refs for spell mode (avoid stale closures in useEffect)
-  const modeRef = useRef<'phrase' | 'spell'>('phrase')
+  const modeRef = useRef<'phrase' | 'spell' | 'sentence'>('phrase')
   const currentWordRef = useRef('')
   const showReferenceRef = useRef(false)
 
@@ -141,7 +144,13 @@ function App() {
       gestureName !== 'None' &&
       displayText !== lastCommittedRef.current
     ) {
-      if (modeRef.current === 'spell') {
+      if (modeRef.current === 'sentence') {
+        // Sentence mode: feed every committed gesture into the builder
+        sentenceBuilder.addSign(gestureName)
+        holdCountRef.current = 0
+        lastCommittedRef.current = displayText
+        return
+      } else if (modeRef.current === 'spell') {
         // Letter: append to word
         if (/^ASL_[A-Z]$/.test(gestureName)) {
           const letter = GESTURE_MAP[gestureName] ?? ''
@@ -198,7 +207,7 @@ function App() {
     return () => clearTimeout(id)
   }, [flashText])
 
-  function changeMode(m: 'phrase' | 'spell') {
+  function changeMode(m: 'phrase' | 'spell' | 'sentence') {
     modeRef.current = m
     setMode(m)
     holdCountRef.current = 0
@@ -365,24 +374,28 @@ function App() {
 
           {/* Mode toggle */}
           <div style={{ display: 'flex', gap: '4px' }}>
-            {(['phrase', 'spell'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => changeMode(m)}
-                style={{
-                  fontSize: '11px',
-                  padding: '3px 10px',
-                  borderRadius: '20px',
-                  border: mode === m ? 'none' : '1px solid #334155',
-                  background: mode === m ? '#1D9E75' : 'transparent',
-                  color: mode === m ? '#ffffff' : '#64748b',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                }}
-              >
-                {m.charAt(0).toUpperCase() + m.slice(1)}
-              </button>
-            ))}
+            {(['phrase', 'spell', 'sentence'] as const).map((m) => {
+              const activeColor = m === 'sentence' ? '#7c3aed' : '#1D9E75'
+              const isActive = mode === m
+              return (
+                <button
+                  key={m}
+                  onClick={() => changeMode(m)}
+                  style={{
+                    fontSize: '11px',
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    border: isActive ? 'none' : '1px solid #334155',
+                    background: isActive ? activeColor : 'transparent',
+                    color: isActive ? '#ffffff' : '#64748b',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              )
+            })}
           </div>
 
           {/* ASL Guide */}
@@ -468,23 +481,35 @@ function App() {
             isLoaded={isLoaded}
             onReady={onReady}
           />
-          <OutputPanel
-            currentGesture={gestureName}
-            displayText={displayText}
-            confidence={gestureScore}
-            transcript={transcript}
-            isSpeaking={isSpeaking}
-            copied={copied}
-            mode={mode}
-            currentWord={currentWord}
-            voices={VOICES}
-            selectedVoiceId={selectedVoiceId}
-            onVoiceChange={setSelectedVoiceId}
-            onCopy={onCopy}
-            onShare={handleShare}
-            onClear={() => { clearTranscript(); resetSession(); clearBuffer() }}
-            onOpenReference={() => setShowReference(true)}
-          />
+          {mode === 'sentence' ? (
+            <SentencePanel
+              bufferDisplay={sentenceBuilder.bufferDisplay}
+              currentSentence={sentenceBuilder.currentSentence}
+              sentenceHistory={sentenceBuilder.sentenceHistory}
+              isProcessing={sentenceBuilder.isProcessing}
+              onBuild={sentenceBuilder.buildSentence}
+              onClear={sentenceBuilder.clearSentences}
+              onSpeak={(text) => speak(text, selectedVoiceId)}
+            />
+          ) : (
+            <OutputPanel
+              currentGesture={gestureName}
+              displayText={displayText}
+              confidence={gestureScore}
+              transcript={transcript}
+              isSpeaking={isSpeaking}
+              copied={copied}
+              mode={mode}
+              currentWord={currentWord}
+              voices={VOICES}
+              selectedVoiceId={selectedVoiceId}
+              onVoiceChange={setSelectedVoiceId}
+              onCopy={onCopy}
+              onShare={handleShare}
+              onClear={() => { clearTranscript(); resetSession(); clearBuffer() }}
+              onOpenReference={() => setShowReference(true)}
+            />
+          )}
         </div>
       </main>
     </div>
