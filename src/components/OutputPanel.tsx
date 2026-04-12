@@ -1,12 +1,12 @@
 import { useState } from 'react'
 
 const QUICK_RESPONSES = [
-  { key: 'Thumb_Up', label: 'Yes' },
-  { key: 'Thumb_Down', label: 'No' },
-  { key: 'Open_Palm', label: 'Stop' },
+  { key: 'Thumb_Up',    label: 'Yes' },
+  { key: 'Thumb_Down',  label: 'No' },
+  { key: 'Open_Palm',   label: 'Stop' },
   { key: 'Closed_Fist', label: 'Wait' },
-  { key: 'Victory', label: 'Hello' },
-  { key: 'ILoveYou', label: 'I love you' },
+  { key: 'Victory',     label: 'Hello' },
+  { key: 'ILoveYou',   label: 'I love you' },
   { key: 'Pointing_Up', label: 'One moment' },
 ]
 
@@ -50,119 +50,120 @@ export function OutputPanel({
 
   return (
     <div
+      className="card"
       style={{
-        background: '#ffffff',
-        borderRadius: '12px',
         padding: '24px',
-        minHeight: '320px',
-        height: 'auto',
+        minHeight: '340px',
         display: 'flex',
         flexDirection: 'column',
-        boxSizing: 'border-box',
       }}
     >
-      {/* TOP */}
-      <div>
+      {/* ── Sign hero ─────────────────────────────────────────────── */}
+      <div style={{ marginBottom: '20px' }}>
         <div
           style={{
             fontSize: '10px',
             textTransform: 'uppercase',
-            color: '#64748b',
-            letterSpacing: '0.06em',
+            letterSpacing: '0.09em',
+            color: 'var(--text-3)',
+            marginBottom: '8px',
+            fontWeight: 500,
           }}
         >
           Now detecting
         </div>
+
         <div
           key={displayText}
-          style={{
-            fontSize: '28px',
-            fontWeight: 600,
-            color: '#0f172a',
-            minHeight: '44px',
-            marginTop: '4px',
-            animation: 'fadeUp 0.2s ease-out',
-          }}
+          className="sign-hero animating"
         >
-          {displayText}
+          {displayText || '\u00A0'}
         </div>
+
         {/* Confidence bar */}
         <div
           style={{
             width: '100%',
-            height: '6px',
-            borderRadius: '3px',
-            background: '#e2e8f0',
-            marginTop: '8px',
+            height: '3px',
+            background: 'var(--border)',
+            borderRadius: 'var(--r-pill)',
+            marginTop: '16px',
+            overflow: 'hidden',
           }}
         >
           <div
             style={{
               width: `${confidence * 100}%`,
               height: '100%',
-              borderRadius: '3px',
-              background: '#1D9E75',
-              transition: 'width 200ms ease',
+              background: 'var(--amber)',
+              borderRadius: 'var(--r-pill)',
+              transition: 'width 180ms ease',
             }}
           />
         </div>
-        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+
+        {/* Gesture key / definition */}
+        <div style={{ fontSize: '13px', color: 'var(--text-3)', marginTop: '5px' }}>
           {currentGesture ?? ''}
         </div>
 
-        {/* Word builder (spell mode) */}
+        {/* Spell-mode word builder */}
         {mode === 'spell' && currentWord !== '' && (
-          <div style={{ marginTop: '10px' }}>
-            <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Building:
+          <div
+            style={{
+              marginTop: '12px',
+              padding: '10px 14px',
+              background: 'var(--surface-2)',
+              borderRadius: 'var(--r-md)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>
+              Building word
             </div>
             <span
               className="word-cursor"
-              style={{ fontSize: '16px', fontFamily: 'monospace', color: '#0f172a', marginTop: '2px', display: 'inline-block' }}
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '22px',
+                fontStyle: 'italic',
+                color: 'var(--primary)',
+              }}
             >
               {currentWord}
             </span>
           </div>
         )}
         {mode === 'spell' && currentWord === '' && (
-          <div style={{ marginTop: '8px', fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>
-            Spell mode: sign letters → Open Palm to commit word
+          <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-3)', fontStyle: 'italic' }}>
+            Spell mode: sign letters · Open Palm to commit word
           </div>
         )}
       </div>
 
-      {/* MIDDLE */}
-      <div style={{ flex: 1, overflowY: 'auto', marginTop: '16px' }}>
+      {/* ── Transcript ────────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
         <div
           style={{
             fontSize: '10px',
             textTransform: 'uppercase',
-            color: '#64748b',
-            letterSpacing: '0.06em',
-            marginBottom: '8px',
+            letterSpacing: '0.09em',
+            color: 'var(--text-3)',
+            marginBottom: '10px',
+            fontWeight: 500,
           }}
         >
           Transcript
         </div>
+
         {transcript.length === 0 ? (
-          <div style={{ fontStyle: 'italic', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', lineHeight: 1.6 }}>
             Try signing: thumbs up = Yes · peace sign = Hello · or switch to Spell mode to build words letter by letter
           </div>
         ) : (
           <div>
             {transcript.map((item, i) => (
-              <span
-                key={i}
-                style={{
-                  display: 'inline-block',
-                  background: '#f0fdf4',
-                  color: '#166534',
-                  borderRadius: '20px',
-                  padding: '3px 10px',
-                  fontSize: '12px',
-                  margin: '3px',
-                }}
-              >
+              <span key={i} className="msg-bubble">
                 {item}
               </span>
             ))}
@@ -170,41 +171,33 @@ export function OutputPanel({
         )}
       </div>
 
-      {/* QUICK RESPONSE STRIP (when open) */}
+      {/* ── Quick responses (expandable) ─────────────────────────── */}
       {refOpen && (
         <div
           style={{
-            borderTop: '1px solid #f1f5f9',
-            padding: '12px',
-            background: '#fafafa',
-            marginTop: '8px',
+            borderTop: '1px solid var(--border)',
+            paddingTop: '12px',
+            marginBottom: '12px',
           }}
         >
-          <div
-            style={{
-              fontSize: '10px',
-              textTransform: 'uppercase',
-              color: '#94a3b8',
-              letterSpacing: '0.06em',
-              marginBottom: '8px',
-            }}
-          >
-            Quick responses
+          <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--text-3)', marginBottom: '8px', fontWeight: 500 }}>
+            Quick references
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
             {QUICK_RESPONSES.map((entry) => {
               const active = entry.key === currentGesture
               return (
                 <span
                   key={entry.key}
                   style={{
-                    borderRadius: '20px',
-                    padding: '5px 10px',
+                    borderRadius: 'var(--r-pill)',
+                    padding: '5px 11px',
                     fontSize: '12px',
-                    background: active ? '#1D9E75' : '#f1f5f9',
-                    color: active ? '#ffffff' : '#334155',
-                    border: active ? '1px solid #1D9E75' : '1px solid #e2e8f0',
-                    transition: 'background 150ms ease',
+                    background: active ? 'var(--primary)' : 'var(--surface-2)',
+                    color: active ? '#ffffff' : 'var(--text-2)',
+                    border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+                    transition: 'background 120ms ease',
+                    fontWeight: active ? 500 : 400,
                   }}
                 >
                   {entry.label}
@@ -213,47 +206,51 @@ export function OutputPanel({
             })}
           </div>
           {onOpenReference && (
-            <div
+            <button
               onClick={onOpenReference}
               style={{
-                marginTop: '8px',
+                marginTop: '10px',
+                background: 'none',
+                border: 'none',
                 fontSize: '11px',
-                color: '#1D9E75',
-                cursor: 'pointer',
+                color: 'var(--primary)',
                 textDecoration: 'underline',
+                padding: 0,
               }}
             >
               View all signs →
-            </div>
+            </button>
           )}
         </div>
       )}
 
-      {/* BOTTOM */}
+      {/* ── Bottom strip ─────────────────────────────────────────── */}
       <div
         style={{
-          marginTop: 'auto',
+          borderTop: '1px solid var(--border)',
           paddingTop: '12px',
-          borderTop: '1px solid #f1f5f9',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: '8px',
+          flexWrap: 'wrap',
         }}
       >
-        {/* Left: voice + speaking */}
+        {/* Voice + speaking */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '10px', color: '#94a3b8' }}>Voice:</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Voice</span>
           <select
             value={selectedVoiceId}
             onChange={(e) => onVoiceChange(e.target.value)}
             style={{
               fontSize: '11px',
-              color: '#64748b',
-              border: '1px solid #e2e8f0',
-              borderRadius: '6px',
-              padding: '2px 6px',
-              background: 'transparent',
+              color: 'var(--text-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-sm)',
+              padding: '2px 7px',
+              background: 'var(--surface-2)',
               cursor: 'pointer',
+              outline: 'none',
             }}
           >
             {voices.map((v) => (
@@ -261,33 +258,24 @@ export function OutputPanel({
             ))}
           </select>
           {isSpeaking && (
-            <>
-              <div
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  background: '#1D9E75',
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ fontSize: '11px', color: '#1D9E75' }}>Speaking...</span>
-            </>
+            <span style={{ fontSize: '11px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--primary)', display: 'inline-block', animation: 'pulse 1s ease-in-out infinite' }} />
+              Speaking
+            </span>
           )}
         </div>
 
-        {/* Right: Reference + Copy + Download + Share + Clear */}
-        <div style={{ display: 'flex', gap: '6px' }}>
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
           {[
-            { label: refOpen ? 'Reference ▴' : 'Reference ▾', action: () => setRefOpen((o) => !o) },
+            { label: refOpen ? 'Guide ▴' : 'Guide ▾', action: () => setRefOpen((o) => !o) },
             { label: copied ? 'Copied!' : 'Copy', action: onCopy },
             {
-              label: 'Download',
+              label: 'Save',
               action: () => {
                 const content =
                   'EchoSense Transcript\n' +
-                  'Generated: ' + new Date().toLocaleString() + '\n' +
-                  '---\n' +
+                  'Generated: ' + new Date().toLocaleString() + '\n---\n' +
                   transcript.join('\n')
                 const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }))
                 const a = document.createElement('a')
@@ -305,12 +293,12 @@ export function OutputPanel({
               style={{
                 fontSize: '11px',
                 padding: '4px 10px',
-                borderRadius: '6px',
-                border: '1px solid #e2e8f0',
-                background: 'transparent',
-                color: '#64748b',
-                cursor: 'pointer',
+                borderRadius: 'var(--r-sm)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-2)',
+                color: label === 'Copied!' ? 'var(--primary)' : 'var(--text-2)',
                 whiteSpace: 'nowrap',
+                fontWeight: label === 'Copied!' ? 500 : 400,
               }}
             >
               {label}
@@ -325,12 +313,12 @@ export function OutputPanel({
             style={{
               fontSize: '11px',
               padding: '4px 10px',
-              borderRadius: '6px',
-              border: '1px solid #e2e8f0',
-              background: 'transparent',
-              color: shared ? '#1D9E75' : '#64748b',
-              cursor: 'pointer',
+              borderRadius: 'var(--r-sm)',
+              border: `1px solid ${shared ? 'var(--primary)' : 'var(--border)'}`,
+              background: shared ? 'var(--primary-dim)' : 'var(--surface-2)',
+              color: shared ? 'var(--primary)' : 'var(--text-2)',
               whiteSpace: 'nowrap',
+              fontWeight: shared ? 500 : 400,
             }}
           >
             {shared ? 'Linked!' : 'Share'}

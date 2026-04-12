@@ -100,6 +100,7 @@ Rules:
 - Negation (NO/NOT) comes after the verb in ASL
 - WHERE questions appear at the end in ASL
 - Spelled words (consecutive letters) are real words
+- Some tokens are individual letters (shown as single characters like H, I, W). If consecutive letters spell a word, treat them as that word. If they don't form a word, include them as initials or abbreviations.
 - Produce ONE natural English sentence or short phrase
 - If it's a question, end with ?
 - Keep it simple and literal — do not over-interpret

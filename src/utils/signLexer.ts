@@ -55,6 +55,42 @@ const WORD_BOUNDARY = new Set(['ASL_SPACE'])
 // Gestures that delete the last committed token.
 const DELETE_TOKEN = new Set(['ASL_DELETE'])
 
+// ── Simple word dictionary for letter-grouping validation ────────────
+const COMMON_WORDS = new Set([
+  'a','an','the','i','me','my','you','your','we',
+  'is','am','are','was','be','do','did','have',
+  'has','can','will','would','should','could',
+  'yes','no','hi','hello','help','stop','wait',
+  'eat','drink','water','food','pain','hurt',
+  'more','done','name','where','what','who','how',
+  'please','sorry','thank','love','want','need',
+  'go','come','here','there','now','today',
+  'good','bad','hot','cold','sick','fine','ok',
+  'bathroom','hospital','phone','family','friend',
+  'mom','dad','baby','home','work','school',
+  'one','two','three','four','five','six',
+  'seven','eight','nine','ten',
+  'hi','bye','no','ok','dr','mr','ms',
+  'not','but','and','or','for','with','from',
+  'this','that','they','them','she','her','he','him',
+  'it','its','our','all','just','get','got','let',
+  'why','may','must','too','very','much','like',
+  'back','call','know','think','feel','see','look',
+  'tell','ask','say','take','give','make','keep',
+])
+
+export function isLikelyWord(word: string): boolean {
+  const lower = word.toLowerCase()
+  if (lower.length === 1) return true
+  if (lower.length === 2) {
+    return ['ok','hi','no','me','my','is','am',
+            'be','do','go','we','an','at','by',
+            'if','in','of','on','or','so','to',
+            'up','us','he','it'].includes(lower)
+  }
+  return COMMON_WORDS.has(lower)
+}
+
 function isLetter(sign: string): boolean {
   return sign.startsWith('ASL_') && sign.length === 5 &&
     sign[4] >= 'A' && sign[4] <= 'Z'
@@ -84,7 +120,7 @@ export function lexSigns(signs: string[]): SignToken[] {
       continue
     }
 
-    // LETTER GROUPING — consecutive ASL_A..Z (with no SPACE between) → WORD token
+    // LETTER GROUPING — consecutive ASL_A..Z (with no SPACE between) → WORD or individual LETTER tokens
     if (isLetter(sign)) {
       let word = ''
       while (
@@ -95,7 +131,16 @@ export function lexSigns(signs: string[]): SignToken[] {
         word += signs[i][4]
         i++
       }
-      tokens.push({ type: 'WORD', value: word, raw: word })
+
+      if (isLikelyWord(word)) {
+        // Recognized word — emit as single WORD token
+        tokens.push({ type: 'WORD', value: word, raw: word })
+      } else {
+        // Not a recognizable word — break back into individual letters
+        for (const letter of word) {
+          tokens.push({ type: 'LETTER', value: letter, raw: `ASL_${letter}` })
+        }
+      }
       continue
     }
 

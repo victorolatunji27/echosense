@@ -13,6 +13,9 @@ import { SentencePanel } from './components/SentencePanel'
 import { GestureFlash } from './components/GestureFlash'
 import { PracticeMode } from './components/PracticeMode'
 import { ReferenceSheet } from './components/ReferenceSheet'
+import { LoaderScreen } from './components/LoaderScreen'
+import { CustomCursor } from './components/CustomCursor'
+import { AboutModal } from './components/AboutModal'
 
 const ELEVENLABS_KEY = import.meta.env.VITE_ELEVENLABS_KEY ?? ''
 
@@ -55,11 +58,12 @@ function App() {
   const [currentWord, setCurrentWord] = useState('')
   const [showAbout, setShowAbout] = useState(false)
   const [showReference, setShowReference] = useState(false)
+  const [holdProgress, setHoldProgress] = useState(0)
 
-  // Refs for spell mode (avoid stale closures in useEffect)
   const modeRef = useRef<'phrase' | 'spell' | 'sentence'>('phrase')
   const currentWordRef = useRef('')
   const showReferenceRef = useRef(false)
+  const hadLandmarksRef = useRef(false)
 
   useEffect(() => { showReferenceRef.current = showReference }, [showReference])
 
@@ -91,17 +95,12 @@ function App() {
       const params = new URLSearchParams(window.location.search)
       const encoded = params.get('transcript')
       if (!encoded) return
-
       const decoded = decodeURIComponent(atob(encoded))
       const lines = decoded.split('\n').filter((line) => line.trim().length > 0)
-
       if (lines.length === 0) return
-
       lines.forEach((line) => addPhrase(line))
-
       setSharedTranscriptLoaded(true)
       setTimeout(() => setSharedTranscriptLoaded(false), 3000)
-
       window.history.replaceState({}, document.title, window.location.pathname)
     } catch (e) {
       console.warn('Could not parse shared transcript:', e)
@@ -121,14 +120,32 @@ function App() {
   const lastCommittedRef = useRef('')
   const prevGestureRef = useRef<string | null>(null)
 
-  // Reset hold count when sensitivity changes
   useEffect(() => {
     holdCountRef.current = 0
   }, [sensitivity])
 
-  // Gesture commit logic
+  // ── FIX 1: Hand drop / return detection ────────────────────────────
   useEffect(() => {
-    // Feed landmarks into the rolling buffer for LSTM
+    const hasHand = landmarks !== null
+
+    if (!hasHand && hadLandmarksRef.current) {
+      // Hand just dropped
+      if (modeRef.current === 'sentence') {
+        sentenceBuilder.onHandDrop()
+      }
+    }
+    if (hasHand && !hadLandmarksRef.current) {
+      // Hand just returned
+      if (modeRef.current === 'sentence') {
+        sentenceBuilder.onHandReturn()
+      }
+    }
+    hadLandmarksRef.current = hasHand
+  }, [landmarks])
+
+  // ── Gesture commit logic ───────────────────────────────────────────
+  // Depends on both gestureName AND landmarks so it fires every frame
+  useEffect(() => {
     addFrame(landmarks)
 
     if (gestureName === prevGestureRef.current && gestureName !== null && gestureName !== 'None') {
@@ -138,41 +155,38 @@ function App() {
     }
     prevGestureRef.current = gestureName
 
-    // Base commit gate — hold long enough, have a real gesture
+    // FIX 2: Update hold progress for the arc visualization
+    const progress = (gestureName && gestureName !== 'None' && gestureName !== 'ASL_NOTHING')
+      ? Math.min(holdCountRef.current / HOLD_THRESHOLD, 1)
+      : 0
+    setHoldProgress(progress)
+
     const canCommit =
       holdCountRef.current >= HOLD_THRESHOLD &&
       gestureName !== null &&
       gestureName !== 'None' &&
       gestureName !== 'ASL_NOTHING'
 
-    // ── Sentence mode ─────────────────────────────────────────────────────
-    // Intentionally bypasses the displayText dedup check so that:
-    //   • ASL_SPACE (no display text) can commit as a word boundary
-    //   • The same letter can be signed consecutively (double-L in HELLO etc.)
+    // Sentence mode — bypass displayText dedup for space/consecutive letters
     if (canCommit && modeRef.current === 'sentence') {
       sentenceBuilder.addSign(gestureName)
+      sentenceBuilder.onHandReturn() // cancel any pending drop timer
       holdCountRef.current = 0
-      // Reset to '' so the same gesture can be signed again immediately
       lastCommittedRef.current = ''
       return
     }
 
-    // ── Phrase + Spell modes ──────────────────────────────────────────────
-    if (
-      canCommit &&
-      displayText !== lastCommittedRef.current
-    ) {
+    // Phrase + Spell modes
+    if (canCommit && displayText !== lastCommittedRef.current) {
       if (modeRef.current === 'spell') {
-        // Letter: append to word
         if (/^ASL_[A-Z]$/.test(gestureName)) {
           const letter = GESTURE_MAP[gestureName] ?? ''
           const newWord = currentWordRef.current + letter
           currentWordRef.current = newWord
           setCurrentWord(newWord)
-          lastCommittedRef.current = '' // allow same letter again
+          lastCommittedRef.current = ''
           holdCountRef.current = 0
         } else if (gestureName === 'Open_Palm') {
-          // Commit word to transcript
           if (currentWordRef.current !== '') {
             addPhrase(currentWordRef.current)
             speak(currentWordRef.current, selectedVoiceId)
@@ -184,14 +198,12 @@ function App() {
           lastCommittedRef.current = displayText
           holdCountRef.current = 0
         } else if (gestureName === 'Closed_Fist') {
-          // Backspace
           const newWord = currentWordRef.current.slice(0, -1)
           currentWordRef.current = newWord
           setCurrentWord(newWord)
           lastCommittedRef.current = ''
           holdCountRef.current = 0
         } else if (displayText !== '') {
-          // Other non-letter gestures in spell mode act as phrase
           addPhrase(displayText)
           speak(displayText, selectedVoiceId)
           setFlashText(displayText)
@@ -200,7 +212,6 @@ function App() {
           holdCountRef.current = 0
         }
       } else {
-        // Phrase mode
         if (displayText !== '') {
           addPhrase(displayText)
           speak(displayText, selectedVoiceId)
@@ -211,7 +222,7 @@ function App() {
         }
       }
     }
-  }, [gestureName])
+  }, [gestureName, landmarks])
 
   useEffect(() => {
     if (flashText === null) return
@@ -252,15 +263,24 @@ function App() {
     ;(canvasRef as React.MutableRefObject<HTMLCanvasElement>).current = canvas
   }
 
+  // Classifier status
+  const classifierStatus =
+    cnnClassifier.isAvailable && lstmClassifier.isAvailable
+      ? { text: 'CNN + LSTM', color: 'var(--primary)' }
+      : cnnClassifier.isAvailable
+      ? { text: 'CNN', color: 'var(--primary)' }
+      : lstmClassifier.isAvailable
+      ? { text: 'LSTM', color: 'var(--primary)' }
+      : { text: 'Geometric', color: 'var(--text-3)' }
+
   return (
-    <div style={{ background: '#0f172a', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ background: 'var(--bg)', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <CustomCursor />
+      <LoaderScreen isLoaded={isLoaded} />
       <GestureFlash text={flashText} gestureKey={gestureName} />
 
       {showReference && (
-        <ReferenceSheet
-          onClose={() => setShowReference(false)}
-          currentGesture={gestureName}
-        />
+        <ReferenceSheet onClose={() => setShowReference(false)} currentGesture={gestureName} />
       )}
 
       {practiceMode && (
@@ -271,123 +291,98 @@ function App() {
         />
       )}
 
-      {/* About modal */}
-      {showAbout && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.7)',
-            zIndex: 100,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onClick={() => setShowAbout(false)}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              padding: '32px',
-              maxWidth: '440px',
-              width: '90%',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#0f172a' }}>EchoSense</div>
-            <div style={{ fontSize: '14px', color: '#64748b', marginTop: '4px' }}>
-              Real-time American Sign Language interpreter
-            </div>
-            <div style={{ marginTop: '20px', fontSize: '13px', color: '#334155', lineHeight: 1.7 }}>
-              <p>Supports 7 quick response gestures, full ASL alphabet A–Z, and numbers 0–9.</p>
-              <p style={{ marginTop: '8px' }}>Built with React, MediaPipe, and ElevenLabs at BitCamp 2026.</p>
-              <p style={{ marginTop: '8px' }}>Share your session transcript as a link — anyone with the link can view your signs instantly, no account required.</p>
-              <p style={{ marginTop: '8px', color: '#1D9E75', fontStyle: 'italic' }}>
-                500,000+ ASL users in the US deserve spontaneous communication.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAbout(false)}
-              style={{
-                marginTop: '24px',
-                padding: '8px 20px',
-                borderRadius: '8px',
-                background: '#1D9E75',
-                color: '#ffffff',
-                border: 'none',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer',
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
 
-      {/* Header */}
+      {/* ── Sticky header (FIX 7: 72px, bigger logo) ─────────────── */}
       <header
         style={{
-          padding: '12px 24px',
-          borderBottom: '1px solid #1e293b',
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          padding: '0 28px',
+          height: '72px',
+          borderBottom: '1px solid var(--border)',
+          background: 'rgba(247,245,242,0.92)',
+          backdropFilter: 'blur(12px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '8px',
+          gap: '12px',
         }}
       >
-        {/* Left: logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#ffffff', fontSize: '18px', fontWeight: 500 }}>EchoSense</span>
-          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1D9E75' }} />
-          <span style={{ fontSize: '11px', color: '#1D9E75' }}>Live</span>
+        {/* Logo (FIX 7) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            <span
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '32px',
+                fontWeight: 400,
+                color: 'var(--text)',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.1,
+              }}
+            >
+              Echo<span style={{ color: 'var(--primary)' }}>Sense</span>
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--font-ui)',
+                fontSize: '10px',
+                color: 'var(--text-3)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                lineHeight: 1,
+              }}
+            >
+              ASL Interpreter
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div
+              style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: 'var(--primary)',
+                animation: isLoaded ? 'pulse 2.5s ease-in-out infinite' : 'none',
+              }}
+            />
+            <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 500, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              {isLoaded ? 'Live' : 'Loading'}
+            </span>
+          </div>
         </div>
 
-        {/* Right: controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {landmarks !== null && (
-            <span style={{ fontSize: '12px', color: '#1D9E75' }}>Hand detected</span>
+            <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 500 }}>
+              Hand detected
+            </span>
           )}
 
-          <span className="session-stats" style={{ fontSize: '12px', color: '#64748b' }}>
+          <span className="session-stats" style={{ fontSize: '11px', color: 'var(--text-3)' }}>
             {signCount} signs · {formatTime(elapsed)}
           </span>
 
-          <span style={{ fontSize: '12px', color: '#64748b' }}>
-            {isLoaded ? 'Model ready' : 'Loading model...'}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: classifierStatus.color }} />
+            <span style={{ fontSize: '10px', color: classifierStatus.color }}>{classifierStatus.text}</span>
           </span>
 
-          {/* Classifier status indicator */}
-          {(() => {
-            const classifierStatus =
-              cnnClassifier.isAvailable && lstmClassifier.isAvailable
-                ? { text: 'CNN + LSTM active', color: '#1D9E75' }
-                : cnnClassifier.isAvailable
-                ? { text: 'CNN active', color: '#1D9E75' }
-                : lstmClassifier.isAvailable
-                ? { text: 'LSTM active', color: '#1D9E75' }
-                : { text: 'Geometric classifier (no model files)', color: '#64748b' }
-            return (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <div style={{
-                  width: '6px', height: '6px', borderRadius: '50%',
-                  background: classifierStatus.color, flexShrink: 0,
-                }} />
-                <span style={{ fontSize: '11px', color: classifierStatus.color }}>
-                  {classifierStatus.text}
-                </span>
-              </span>
-            )
-          })()}
-
-          {/* Mode toggle */}
-          <div style={{ display: 'flex', gap: '4px' }}>
+          {/* Mode tabs */}
+          <div
+            style={{
+              display: 'flex',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-pill)',
+              padding: '2px',
+              gap: '2px',
+            }}
+          >
             {(['phrase', 'spell', 'sentence'] as const).map((m) => {
-              const activeColor = m === 'sentence' ? '#7c3aed' : '#1D9E75'
               const isActive = mode === m
               return (
                 <button
@@ -395,12 +390,13 @@ function App() {
                   onClick={() => changeMode(m)}
                   style={{
                     fontSize: '11px',
-                    padding: '3px 10px',
-                    borderRadius: '20px',
-                    border: isActive ? 'none' : '1px solid #334155',
-                    background: isActive ? activeColor : 'transparent',
-                    color: isActive ? '#ffffff' : '#64748b',
-                    cursor: 'pointer',
+                    padding: '3px 11px',
+                    borderRadius: 'var(--r-pill)',
+                    border: 'none',
+                    background: isActive ? 'var(--primary)' : 'transparent',
+                    color: isActive ? '#ffffff' : 'var(--text-3)',
+                    fontWeight: isActive ? 500 : 400,
+                    transition: 'background 0.15s, color 0.15s',
                     textTransform: 'capitalize',
                   }}
                 >
@@ -410,35 +406,48 @@ function App() {
             })}
           </div>
 
-          {/* ASL Guide */}
           <button
             onClick={() => setShowReference(true)}
             style={{
-              fontSize: '11px', padding: '4px 12px', borderRadius: '20px',
-              border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer',
+              fontSize: '11px',
+              padding: '4px 13px',
+              borderRadius: 'var(--r-pill)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text-2)',
             }}
           >
             ASL Guide
           </button>
 
-          {/* Speed control */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-            <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.06em' }}>
+          {/* Speed */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '10px', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Speed
             </span>
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div
+              style={{
+                display: 'flex',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--r-pill)',
+                padding: '2px',
+                gap: '2px',
+              }}
+            >
               {(['fast', 'medium', 'slow'] as const).map((s) => (
                 <button
                   key={s}
                   onClick={() => setSensitivity(s)}
                   style={{
-                    fontSize: '11px',
-                    padding: '3px 10px',
-                    borderRadius: '20px',
-                    border: sensitivity === s ? 'none' : '1px solid #334155',
-                    background: sensitivity === s ? '#1D9E75' : 'transparent',
-                    color: sensitivity === s ? '#ffffff' : '#64748b',
-                    cursor: 'pointer',
+                    fontSize: '10px',
+                    padding: '2px 9px',
+                    borderRadius: 'var(--r-pill)',
+                    border: 'none',
+                    background: sensitivity === s ? 'var(--primary)' : 'transparent',
+                    color: sensitivity === s ? '#ffffff' : 'var(--text-3)',
+                    transition: 'background 0.15s',
+                    textTransform: 'capitalize',
                   }}
                 >
                   {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -447,21 +456,35 @@ function App() {
             </div>
           </div>
 
-          {/* Practice + About buttons */}
           <button
             onClick={() => setPracticeMode(true)}
             style={{
-              fontSize: '12px', padding: '5px 12px', borderRadius: '6px',
-              border: '1px solid #1D9E75', background: 'transparent', color: '#1D9E75', cursor: 'pointer',
+              fontSize: '11px',
+              padding: '4px 13px',
+              borderRadius: 'var(--r-pill)',
+              border: '1px solid var(--primary)',
+              background: 'transparent',
+              color: 'var(--primary)',
+              fontWeight: 500,
             }}
           >
             Practice
           </button>
+
           <button
             onClick={() => setShowAbout(true)}
             style={{
-              fontSize: '12px', padding: '5px 10px', borderRadius: '6px',
-              border: '1px solid #334155', background: 'transparent', color: '#64748b', cursor: 'pointer',
+              width: '28px',
+              height: '28px',
+              borderRadius: 'var(--r-pill)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
+              color: 'var(--text-3)',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             ?
@@ -471,35 +494,51 @@ function App() {
 
       {/* Shared transcript banner */}
       {sharedTranscriptLoaded && (
-        <div style={{
-          background: '#0F6E56',
-          color: 'white',
-          textAlign: 'center',
-          padding: '10px 24px',
-          fontSize: 13,
-          fontWeight: 500,
-          animation: 'fadeUp 0.3s ease-out',
-        }}>
+        <div
+          style={{
+            background: 'var(--primary)',
+            color: '#ffffff',
+            textAlign: 'center',
+            padding: '10px 24px',
+            fontSize: '13px',
+            fontWeight: 500,
+            animation: 'fadeUp 0.3s ease-out',
+            letterSpacing: '0.01em',
+          }}
+        >
           Shared transcript loaded — {transcript.length} signs restored
         </div>
       )}
 
-      {/* Main */}
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 24px' }}>
+      {/* Main (FIX 6: tighter padding) */}
+      <main
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          padding: '20px 24px 32px',
+        }}
+      >
         <div className="main-grid">
           <CameraView
             landmarks={landmarks}
             gestureName={gestureName}
             isLoaded={isLoaded}
+            holdProgress={holdProgress}
+            currentLetter={displayText}
             onReady={onReady}
           />
+
           {mode === 'sentence' ? (
             <SentencePanel
               bufferDisplay={sentenceBuilder.bufferDisplay}
               currentSentence={sentenceBuilder.currentSentence}
+              pendingSentence={sentenceBuilder.pendingSentence}
               sentenceHistory={sentenceBuilder.sentenceHistory}
               isProcessing={sentenceBuilder.isProcessing}
               onBuild={sentenceBuilder.buildSentence}
+              onRelease={sentenceBuilder.releaseSentence}
               onClear={sentenceBuilder.clearSentences}
               onSpeak={(text) => speak(text, selectedVoiceId)}
               currentGesture={gestureName}

@@ -35,7 +35,8 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
         position: 'fixed',
         inset: 0,
         zIndex: 100,
-        background: 'rgba(15,23,42,0.97)',
+        background: 'rgba(247,245,242,0.97)',
+        backdropFilter: 'blur(8px)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -45,34 +46,44 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
       <div
         style={{
           flexShrink: 0,
-          padding: '16px 24px',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          padding: '16px 28px',
+          borderBottom: '1px solid var(--border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: '16px',
+          background: 'var(--surface)',
         }}
       >
         <div>
-          <div style={{ color: '#ffffff', fontSize: '18px', fontWeight: 500 }}>
-            ASL Reference Sheet
+          <div
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '22px',
+              fontStyle: 'italic',
+              color: 'var(--primary)',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            ASL Reference
           </div>
-          <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '2px' }}>
-            Hold each sign steady for 2 seconds for EchoSense to recognize it
+          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '2px' }}>
+            Hold each sign steady for 2 seconds · EchoSense will detect it
           </div>
         </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <input
             type="text"
-            placeholder="Search signs..."
+            placeholder="Search signs…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              borderRadius: '8px',
-              padding: '6px 12px',
-              color: '#ffffff',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-md)',
+              padding: '7px 13px',
+              color: 'var(--text)',
               fontSize: '13px',
               width: '200px',
               outline: 'none',
@@ -81,15 +92,17 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
           <button
             onClick={onClose}
             style={{
-              marginLeft: '4px',
-              background: 'transparent',
-              border: 'none',
-              color: '#ffffff',
-              fontSize: '24px',
-              cursor: 'pointer',
+              width: '32px',
+              height: '32px',
+              borderRadius: 'var(--r-pill)',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-3)',
+              fontSize: '18px',
               lineHeight: 1,
-              padding: '0 8px',
-              opacity: 0.7,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             ×
@@ -101,16 +114,16 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
       <div
         style={{
           flexShrink: 0,
-          padding: '0 24px',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          padding: '0 28px',
+          borderBottom: '1px solid var(--border)',
           display: 'flex',
-          gap: '4px',
+          gap: '2px',
           overflowX: 'auto',
+          background: 'var(--surface)',
         }}
       >
         {tabs.map((tab, tabIdx) => {
-          const isActive =
-            tabIdx === 0 ? activeSection === -1 : activeSection === tabIdx - 1
+          const isActive = tabIdx === 0 ? activeSection === -1 : activeSection === tabIdx - 1
           return (
             <button
               key={tab}
@@ -118,15 +131,17 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
               style={{
                 padding: '10px 16px',
                 fontSize: '12px',
+                fontWeight: isActive ? 500 : 400,
                 cursor: 'pointer',
-                borderBottom: isActive ? '2px solid #1D9E75' : '2px solid transparent',
-                color: isActive ? '#ffffff' : '#94a3b8',
+                borderBottomWidth: '2px',
+                borderBottomStyle: 'solid',
+                borderBottomColor: isActive ? 'var(--primary)' : 'transparent',
+                color: isActive ? 'var(--primary)' : 'var(--text-3)',
                 background: 'transparent',
                 border: 'none',
-                borderBottomStyle: 'solid',
-                borderBottomWidth: '2px',
-                borderBottomColor: isActive ? '#1D9E75' : 'transparent',
+                borderBottom: undefined,
                 whiteSpace: 'nowrap',
+                transition: 'color 0.15s',
               }}
             >
               {tab}
@@ -135,29 +150,36 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
         })}
       </div>
 
-      {/* Main content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '28px' }}>
         {filtered.length === 0 && (
-          <div style={{ color: '#64748b', fontSize: '14px', textAlign: 'center', marginTop: '40px' }}>
+          <div style={{ color: 'var(--text-3)', fontSize: '14px', textAlign: 'center', marginTop: '48px', fontStyle: 'italic' }}>
             No signs found matching "{search}"
           </div>
         )}
+
         {filtered.map((section) => (
-          <div key={section.title}>
+          <div key={section.title} style={{ marginBottom: '40px' }}>
             {/* Section header */}
             <div
               style={{
-                background: section.color + '22',
                 borderLeft: `3px solid ${section.color}`,
-                borderRadius: '0 8px 8px 0',
-                padding: '10px 16px',
-                marginBottom: '16px',
+                paddingLeft: '14px',
+                marginBottom: '18px',
               }}
             >
-              <div style={{ fontSize: '14px', fontWeight: 500, color: '#ffffff' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: '18px',
+                  fontStyle: 'italic',
+                  color: 'var(--text)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
                 {section.title}
               </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '2px' }}>
                 {section.description}
               </div>
             </div>
@@ -166,9 +188,8 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
                 gap: '12px',
-                marginBottom: '32px',
               }}
             >
               {section.signs.map((sign) => {
@@ -177,70 +198,61 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
                   <div
                     key={sign.gestureKey}
                     style={{
-                      background: isDetected
-                        ? 'rgba(29,158,117,0.1)'
-                        : 'rgba(255,255,255,0.05)',
-                      border: isDetected
-                        ? '1px solid #1D9E75'
-                        : '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '12px',
+                      background: isDetected ? 'rgba(26,77,58,0.04)' : 'var(--surface)',
+                      border: `1px solid ${isDetected ? 'var(--primary)' : 'var(--border)'}`,
+                      borderRadius: 'var(--r-lg)',
                       padding: '16px',
                       transition: 'border-color 0.2s',
                       position: 'relative',
+                      boxShadow: isDetected ? '0 0 0 3px rgba(26,77,58,0.08)' : 'none',
                     }}
                   >
-                    {/* Detected pill */}
                     {isDetected && (
                       <div
                         style={{
                           position: 'absolute',
                           top: '12px',
                           right: '12px',
-                          background: '#1D9E75',
+                          background: 'var(--primary)',
                           color: '#ffffff',
-                          fontSize: '10px',
+                          fontSize: '9px',
+                          fontWeight: 500,
                           padding: '2px 8px',
-                          borderRadius: '20px',
+                          borderRadius: 'var(--r-pill)',
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
                           animation: 'fadeUp 0.2s ease-out',
                         }}
                       >
-                        Detected!
+                        Detected
                       </div>
                     )}
 
-                    {/* Top row */}
+                    {/* Label row */}
                     <div
                       style={{
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'flex-start',
-                        marginBottom: '10px',
+                        marginBottom: '12px',
                       }}
                     >
-                      <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 600 }}>
+                      <div style={{ fontSize: '15px', fontWeight: 500, color: 'var(--text)' }}>
                         {sign.label}
                       </div>
-                      <div
-                        style={{
-                          fontSize: '10px',
-                          color: '#475569',
-                          fontFamily: 'monospace',
-                          marginLeft: '8px',
-                        }}
-                      >
+                      <div style={{ fontSize: '10px', color: 'var(--text-3)', fontFamily: 'monospace' }}>
                         {sign.gestureKey}
                       </div>
                     </div>
 
-                    {/* Hand shape visual */}
+                    {/* Hand diagram */}
                     <div
                       style={{
                         width: '100%',
-                        background: 'rgba(255,255,255,0.04)',
-                        borderRadius: '10px',
+                        background: 'var(--surface-2)',
+                        borderRadius: 'var(--r-md)',
                         padding: '8px 0',
                         marginBottom: '10px',
-                        boxSizing: 'border-box',
                         display: 'flex',
                         justifyContent: 'center',
                         alignItems: 'center',
@@ -249,49 +261,28 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
                     >
                       <HandDiagram gestureKey={sign.gestureKey} size="md" />
                     </div>
-                    {/* Finger description */}
-                    <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px', lineHeight: 1.5 }}>
+
+                    <div style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '6px', lineHeight: 1.5 }}>
                       {sign.fingers}
                     </div>
 
-                    {/* Hand shape text */}
-                    <div
-                      style={{
-                        fontSize: '12px',
-                        color: '#cbd5e1',
-                        lineHeight: 1.6,
-                        marginBottom: '8px',
-                      }}
-                    >
+                    <div style={{ fontSize: '12px', color: 'var(--text-2)', lineHeight: 1.6, marginBottom: '8px' }}>
                       {sign.handShape}
                     </div>
 
                     {/* Tip */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: '6px',
-                        alignItems: 'flex-start',
-                      }}
-                    >
+                    <div style={{ display: 'flex', gap: '7px', alignItems: 'flex-start' }}>
                       <div
                         style={{
-                          width: '8px',
-                          height: '8px',
+                          width: '7px',
+                          height: '7px',
                           borderRadius: '50%',
-                          background: '#facc15',
+                          background: 'var(--amber)',
                           flexShrink: 0,
-                          marginTop: '3px',
+                          marginTop: '4px',
                         }}
                       />
-                      <div
-                        style={{
-                          fontSize: '11px',
-                          color: '#94a3b8',
-                          fontStyle: 'italic',
-                          lineHeight: 1.5,
-                        }}
-                      >
+                      <div style={{ fontSize: '11px', color: 'var(--text-3)', fontStyle: 'italic', lineHeight: 1.5 }}>
                         {sign.tip}
                       </div>
                     </div>
@@ -307,18 +298,18 @@ export function ReferenceSheet({ onClose, currentGesture }: Props) {
       <div
         style={{
           flexShrink: 0,
-          padding: '12px 24px',
-          borderTop: '1px solid rgba(255,255,255,0.1)',
+          padding: '12px 28px',
+          borderTop: '1px solid var(--border)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          background: 'rgba(15,23,42,0.8)',
+          background: 'var(--surface)',
         }}
       >
-        <div style={{ fontSize: '12px', color: '#64748b' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
           EchoSense supports {TOTAL_SIGNS} signs across {ASL_REFERENCE.length} categories
         </div>
-        <div style={{ fontSize: '11px', color: '#475569' }}>
+        <div style={{ fontSize: '11px', color: 'var(--border-2)' }}>
           Switch to Spell mode to type letter by letter →
         </div>
       </div>

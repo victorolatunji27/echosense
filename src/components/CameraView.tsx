@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useCamera } from '../hooks/useCamera'
 
 const CONNECTIONS: [number, number][] = [
@@ -10,16 +10,40 @@ const CONNECTIONS: [number, number][] = [
   [0,17],
 ]
 
+const ARC_R = 32
+const ARC_CIRC = 2 * Math.PI * ARC_R // 201.06
+
 interface Props {
   landmarks: Array<{ x: number; y: number; z: number }> | null
   gestureName: string | null
   isLoaded: boolean
+  holdProgress: number
+  currentLetter: string
   onReady: (video: HTMLVideoElement, canvas: HTMLCanvasElement) => void
 }
 
-export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props) {
+export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, currentLetter, onReady }: Props) {
   const { videoRef, isReady, error } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Arc fade-out after commit
+  const [arcVisible, setArcVisible] = useState(false)
+  const [arcOpacity, setArcOpacity] = useState(1)
+  const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (holdProgress > 0) {
+      setArcVisible(true)
+      setArcOpacity(1)
+      if (fadeTimer.current) clearTimeout(fadeTimer.current)
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+    } else if (arcVisible) {
+      // Progress dropped to 0 — fade out
+      fadeTimer.current = setTimeout(() => setArcOpacity(0), 200)
+      hideTimer.current = setTimeout(() => setArcVisible(false), 500)
+    }
+  }, [holdProgress])
 
   useEffect(() => {
     if (isReady && videoRef.current && canvasRef.current) {
@@ -27,7 +51,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
     }
   }, [isReady])
 
-  // Draw landmarks and connections on canvas
+  // Draw landmarks on canvas
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -40,8 +64,7 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
     const w = canvas.width
     const h = canvas.height
 
-    // Draw connections
-    ctx.strokeStyle = '#5DCAA5'
+    ctx.strokeStyle = 'rgba(26,77,58,0.7)'
     ctx.lineWidth = 2
     for (const [a, b] of CONNECTIONS) {
       const p1 = landmarks[a]
@@ -53,30 +76,19 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
       ctx.stroke()
     }
 
-    // Draw landmark dots
-    ctx.fillStyle = '#1D9E75'
+    ctx.fillStyle = 'rgba(200,169,110,0.9)'
     for (const lm of landmarks) {
       ctx.beginPath()
-      ctx.arc(lm.x * w, lm.y * h, 4, 0, Math.PI * 2)
+      ctx.arc(lm.x * w, lm.y * h, 3.5, 0, Math.PI * 2)
       ctx.fill()
     }
   }, [landmarks])
 
-  const hasBorder = landmarks !== null
+  const handActive = landmarks !== null
+  const progress = arcVisible ? holdProgress : 0
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100%',
-        maxWidth: '640px',
-        aspectRatio: '4/3',
-        background: '#000',
-        borderRadius: '12px',
-        overflow: 'hidden',
-        border: hasBorder ? '2px solid rgba(29,158,117,0.5)' : '2px solid transparent',
-      }}
-    >
+    <div className={`camera-container${handActive ? ' hand-active' : ''}`}>
       {error ? (
         <div
           style={{
@@ -86,34 +98,34 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '12px',
-            padding: '24px',
+            gap: '16px',
+            padding: '32px',
             textAlign: 'center',
+            background: '#1C1A18',
           }}
         >
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="4" y="12" width="40" height="28" rx="4" stroke="#ef4444" strokeWidth="3"/>
-            <circle cx="24" cy="26" r="7" stroke="#ef4444" strokeWidth="3"/>
-            <line x1="8" y1="8" x2="40" y2="40" stroke="#ef4444" strokeWidth="3" strokeLinecap="round"/>
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+            <rect x="4" y="12" width="40" height="28" rx="5" stroke="rgba(192,57,43,0.7)" strokeWidth="2.5"/>
+            <circle cx="24" cy="26" r="7" stroke="rgba(192,57,43,0.7)" strokeWidth="2.5"/>
+            <line x1="8" y1="8" x2="40" y2="40" stroke="rgba(192,57,43,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
           </svg>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: '#f87171' }}>
+          <div style={{ fontSize: '15px', fontWeight: 500, color: '#F0A876' }}>
             Camera access blocked
           </div>
-          <div style={{ fontSize: '13px', color: '#94a3b8', maxWidth: '320px', lineHeight: 1.5 }}>
-            Click the camera icon in your browser's address bar and select Allow, then click Try Again below.
+          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', maxWidth: '280px', lineHeight: 1.6 }}>
+            Click the camera icon in your browser's address bar and select Allow, then try again.
           </div>
           <button
             onClick={() => window.location.reload()}
             style={{
-              marginTop: '8px',
-              padding: '8px 20px',
-              borderRadius: '8px',
-              background: '#1D9E75',
-              color: 'white',
+              marginTop: '4px',
+              padding: '9px 22px',
+              borderRadius: 'var(--r-md)',
+              background: 'var(--primary)',
+              color: '#ffffff',
               border: 'none',
               fontSize: '13px',
               fontWeight: 500,
-              cursor: 'pointer',
             }}
           >
             Try Again
@@ -134,20 +146,103 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
             height={480}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
           />
-          {gestureName && (
+
+          {/* Gesture label pill */}
+          {gestureName && gestureName !== 'None' && (
             <div
               style={{
                 position: 'absolute',
-                top: '8px',
-                left: '8px',
+                top: '10px',
+                left: '12px',
+                background: 'rgba(26,77,58,0.85)',
                 color: '#ffffff',
-                fontSize: '13px',
-                pointerEvents: 'none',
+                fontSize: '11px',
+                fontWeight: 500,
+                padding: '3px 9px',
+                borderRadius: 'var(--r-pill)',
+                backdropFilter: 'blur(4px)',
+                letterSpacing: '0.03em',
+                zIndex: 2,
               }}
             >
               {gestureName}
             </div>
           )}
+
+          {/* ── Hold progress arc (FIX 2) ──────────────────────────── */}
+          {arcVisible && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '80px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 3,
+                pointerEvents: 'none',
+                opacity: arcOpacity,
+                transition: 'opacity 0.3s ease',
+              }}
+            >
+              <svg width="80" height="80" viewBox="0 0 80 80">
+                {/* Background ring */}
+                <circle
+                  cx="40" cy="40" r={ARC_R}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.15)"
+                  strokeWidth="3"
+                />
+                {/* Progress arc */}
+                <circle
+                  cx="40" cy="40" r={ARC_R}
+                  fill="none"
+                  stroke="#C8A96E"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray={ARC_CIRC}
+                  strokeDashoffset={ARC_CIRC * (1 - progress)}
+                  transform="rotate(-90 40 40)"
+                  style={{ transition: 'stroke-dashoffset 40ms linear' }}
+                />
+                {/* Center content */}
+                {progress > 0 && progress < 1 && (
+                  <text
+                    x="40" y="44"
+                    textAnchor="middle"
+                    fontSize="18"
+                    fontFamily="DM Serif Display, Georgia, serif"
+                    fill="white"
+                    fontWeight="400"
+                  >
+                    {currentLetter || ''}
+                  </text>
+                )}
+                {progress >= 1 && (
+                  <text
+                    x="40" y="46"
+                    textAnchor="middle"
+                    fontSize="22"
+                    fill="#C8A96E"
+                  >
+                    ✓
+                  </text>
+                )}
+                {/* Outer pulse ring at near-completion */}
+                {progress >= 0.95 && (
+                  <circle
+                    cx="40" cy="40" r="36"
+                    fill="none"
+                    stroke="rgba(200,169,110,0.4)"
+                    strokeWidth="1.5"
+                    style={{
+                      animation: 'pulseRing 0.4s ease-out forwards',
+                    }}
+                  />
+                )}
+              </svg>
+            </div>
+          )}
+
+          {/* Camera starting */}
           {!isReady && (
             <div
               style={{
@@ -156,28 +251,43 @@ export function CameraView({ landmarks, gestureName, isLoaded, onReady }: Props)
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#ffffff',
-                fontSize: '14px',
-                animation: 'pulse 1.5s ease-in-out infinite',
+                background: '#1C1A18',
               }}
             >
-              Starting camera...
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    border: '2px solid rgba(26,77,58,0.3)',
+                    borderTopColor: 'var(--primary)',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite',
+                  }}
+                />
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>Starting camera…</span>
+              </div>
             </div>
           )}
+
+          {/* Model loading */}
           {!isLoaded && isReady && (
             <div
               style={{
                 position: 'absolute',
-                inset: 0,
-                background: 'rgba(0,0,0,0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffffff',
-                fontSize: '13px',
+                bottom: '12px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(28,26,24,0.75)',
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: '11px',
+                padding: '4px 12px',
+                borderRadius: 'var(--r-pill)',
+                backdropFilter: 'blur(4px)',
+                whiteSpace: 'nowrap',
               }}
             >
-              Loading gesture model...
+              Loading model…
             </div>
           )}
         </>

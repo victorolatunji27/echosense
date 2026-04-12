@@ -1,12 +1,13 @@
 interface Props {
   bufferDisplay: string[]
   currentSentence: string
+  pendingSentence: string
   sentenceHistory: string[]
   isProcessing: boolean
   onBuild: () => void
+  onRelease: () => void
   onClear: () => void
   onSpeak: (text: string) => void
-  // Live gesture detection — same as other modes
   currentGesture: string | null
   displayText: string
 }
@@ -14,9 +15,11 @@ interface Props {
 export function SentencePanel({
   bufferDisplay,
   currentSentence,
+  pendingSentence,
   sentenceHistory,
   isProcessing,
   onBuild,
+  onRelease,
   onClear,
   onSpeak,
   currentGesture,
@@ -26,75 +29,80 @@ export function SentencePanel({
 
   return (
     <div
+      className="card"
       style={{
-        background: '#161b22',
-        border: '1px solid #1e293b',
-        borderRadius: '12px',
-        padding: '20px',
+        padding: '24px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        gap: '20px',
       }}
     >
-      {/* ── Live gesture detection ─────────────────────────────────────── */}
+      {/* ── Live detection ────────────────────────────────────────── */}
       <div
         style={{
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '10px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--r-md)',
           padding: '12px 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          minHeight: '48px',
+          minHeight: '52px',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <span
+        <div>
+          <div
             style={{
               fontSize: '10px',
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: '#475569',
+              letterSpacing: '0.09em',
+              color: 'var(--text-3)',
+              fontWeight: 500,
+              marginBottom: '4px',
             }}
           >
             Detecting
-          </span>
-          <span
+          </div>
+          <div
             style={{
-              fontSize: '22px',
-              fontWeight: 600,
-              color: hasLiveGesture ? '#ffffff' : '#334155',
-              minHeight: '28px',
-              letterSpacing: hasLiveGesture && displayText.length === 1 ? '0.05em' : '0',
+              fontFamily: hasLiveGesture ? 'var(--font-display)' : 'var(--font-ui)',
+              fontSize: hasLiveGesture ? '26px' : '22px',
+              fontStyle: hasLiveGesture ? 'italic' : 'normal',
+              fontWeight: hasLiveGesture ? 400 : 300,
+              color: hasLiveGesture ? 'var(--primary)' : 'var(--border-2)',
+              minHeight: '30px',
+              letterSpacing: hasLiveGesture ? '-0.01em' : '0',
+              lineHeight: 1.1,
             }}
           >
             {hasLiveGesture ? displayText : '—'}
-          </span>
+          </div>
         </div>
 
-        {/* Pulsing dot when hand is active */}
+        {/* Pulse dot */}
         <div
           style={{
-            width: '10px',
-            height: '10px',
+            width: '9px',
+            height: '9px',
             borderRadius: '50%',
-            background: hasLiveGesture ? '#1D9E75' : '#1e293b',
+            background: hasLiveGesture ? 'var(--primary)' : 'var(--border)',
             animation: hasLiveGesture ? 'pulse 1s ease-in-out infinite' : 'none',
             transition: 'background 0.2s',
+            flexShrink: 0,
           }}
         />
       </div>
 
-      {/* ── Sign buffer ────────────────────────────────────────────────── */}
+      {/* ── Sign buffer ───────────────────────────────────────────── */}
       <div>
         <div
           style={{
             fontSize: '10px',
             textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            color: '#1D9E75',
-            marginBottom: '8px',
+            letterSpacing: '0.09em',
+            color: 'var(--primary)',
+            marginBottom: '10px',
+            fontWeight: 500,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
@@ -107,7 +115,7 @@ export function SentencePanel({
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                background: '#1D9E75',
+                background: 'var(--primary)',
                 animation: 'pulse 1.2s ease-in-out infinite',
                 display: 'inline-block',
               }}
@@ -116,22 +124,23 @@ export function SentencePanel({
         </div>
 
         {bufferDisplay.length === 0 ? (
-          <p style={{ fontSize: '12px', color: '#4b5563', fontStyle: 'italic', margin: 0 }}>
+          <p style={{ fontSize: '12px', color: 'var(--text-3)', fontStyle: 'italic', margin: 0 }}>
             Start signing to build a sentence
           </p>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
             {bufferDisplay.map((token, i) => (
               <span
                 key={`${token}-${i}`}
                 style={{
-                  background: 'rgba(29,158,117,0.15)',
-                  color: '#86efac',
-                  borderRadius: '20px',
-                  padding: '2px 9px',
+                  background: 'var(--primary-dim)',
+                  color: 'var(--primary)',
+                  borderRadius: 'var(--r-pill)',
+                  padding: '3px 10px',
                   fontSize: '11px',
-                  fontFamily: 'monospace',
+                  fontWeight: 500,
                   animation: 'fadeUp 0.15s ease-out',
+                  border: '1px solid rgba(26,77,58,0.15)',
                 }}
               >
                 {token}
@@ -141,15 +150,16 @@ export function SentencePanel({
         )}
       </div>
 
-      {/* ── Current sentence output ────────────────────────────────────── */}
+      {/* ── Sentence output ───────────────────────────────────────── */}
       <div>
         <div
           style={{
             fontSize: '10px',
             textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            color: '#64748b',
-            marginBottom: '8px',
+            letterSpacing: '0.09em',
+            color: 'var(--text-3)',
+            fontWeight: 500,
+            marginBottom: '10px',
           }}
         >
           Sentence
@@ -157,17 +167,18 @@ export function SentencePanel({
 
         <div
           style={{
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '10px',
+            background: pendingSentence ? 'rgba(200,169,110,0.06)' : 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderLeft: pendingSentence ? '3px solid var(--amber)' : '1px solid var(--border)',
+            borderRadius: 'var(--r-md)',
             padding: '14px 16px',
-            minHeight: '56px',
+            minHeight: '60px',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
+            flexDirection: 'column',
+            gap: '8px',
             overflow: 'hidden',
             position: 'relative',
+            transition: 'background 0.2s, border-left 0.2s',
           }}
         >
           {isProcessing ? (
@@ -176,26 +187,80 @@ export function SentencePanel({
               style={{
                 position: 'absolute',
                 inset: 0,
-                borderRadius: '10px',
+                borderRadius: 'var(--r-md)',
                 display: 'flex',
                 alignItems: 'center',
                 paddingLeft: '16px',
               }}
             >
-              <span style={{ color: '#64748b', fontSize: '14px', fontStyle: 'italic' }}>
-                Translating...
+              <span style={{ color: 'var(--text-3)', fontSize: '13px', fontStyle: 'italic' }}>
+                Building sentence…
               </span>
             </div>
+          ) : pendingSentence ? (
+            /* Pending sentence — about to release */
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <span
+                  key={pendingSentence}
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: '20px',
+                    fontStyle: 'italic',
+                    color: 'var(--text)',
+                    animation: 'fadeUp 0.25s ease-out',
+                    flex: 1,
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {pendingSentence}
+                </span>
+                <button
+                  onClick={onRelease}
+                  title="Release now"
+                  style={{
+                    flexShrink: 0,
+                    padding: '5px 14px',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--amber)',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                  }}
+                >
+                  Release
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                <div
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: 'var(--amber)',
+                    animation: 'pulse 0.8s ease-in-out infinite',
+                  }}
+                />
+                <span style={{ fontSize: '10px', color: 'var(--amber)', fontWeight: 500 }}>
+                  Releasing…
+                </span>
+              </div>
+            </div>
           ) : currentSentence ? (
-            <>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <span
                 key={currentSentence}
                 style={{
-                  fontSize: '18px',
-                  fontWeight: 500,
-                  color: '#ffffff',
+                  fontFamily: 'var(--font-display)',
+                  fontSize: '20px',
+                  fontStyle: 'italic',
+                  color: 'var(--text)',
                   animation: 'fadeUp 0.25s ease-out',
                   flex: 1,
+                  letterSpacing: '-0.01em',
+                  lineHeight: 1.3,
                 }}
               >
                 {currentSentence}
@@ -205,36 +270,36 @@ export function SentencePanel({
                 title="Speak"
                 style={{
                   flexShrink: 0,
-                  padding: '5px 12px',
-                  borderRadius: '6px',
-                  background: '#1D9E75',
+                  padding: '5px 14px',
+                  borderRadius: 'var(--r-sm)',
+                  background: 'var(--primary)',
                   color: '#ffffff',
                   border: 'none',
                   fontSize: '12px',
                   fontWeight: 500,
-                  cursor: 'pointer',
                 }}
               >
                 Speak
               </button>
-            </>
+            </div>
           ) : (
-            <span style={{ color: '#4b5563', fontSize: '13px', fontStyle: 'italic' }}>
+            <span style={{ color: 'var(--text-3)', fontSize: '13px', fontStyle: 'italic' }}>
               Sentence will appear here
             </span>
           )}
         </div>
       </div>
 
-      {/* ── Sentence history ──────────────────────────────────────────── */}
+      {/* ── History ───────────────────────────────────────────────── */}
       {sentenceHistory.length > 0 && (
         <div>
           <div
             style={{
               fontSize: '10px',
               textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: '#64748b',
+              letterSpacing: '0.09em',
+              color: 'var(--text-3)',
+              fontWeight: 500,
               marginBottom: '8px',
               display: 'flex',
               alignItems: 'center',
@@ -244,25 +309,19 @@ export function SentencePanel({
             History
             <span
               style={{
-                background: '#1e293b',
-                color: '#94a3b8',
-                borderRadius: '10px',
-                padding: '1px 6px',
+                background: 'var(--surface-2)',
+                color: 'var(--text-3)',
+                borderRadius: 'var(--r-pill)',
+                padding: '1px 7px',
                 fontSize: '10px',
+                border: '1px solid var(--border)',
               }}
             >
               {sentenceHistory.length}
             </span>
           </div>
 
-          <div
-            style={{
-              maxHeight: '140px',
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
+          <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             {[...sentenceHistory].reverse().map((s, i) => (
               <div
                 key={i}
@@ -271,14 +330,13 @@ export function SentencePanel({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '7px 0',
-                  // Use explicit border properties to avoid React style-conflict warning
                   borderBottomWidth: i < sentenceHistory.length - 1 ? '1px' : '0',
                   borderBottomStyle: 'solid',
-                  borderBottomColor: '#1e293b',
+                  borderBottomColor: 'var(--border)',
                   gap: '8px',
                 }}
               >
-                <span style={{ fontSize: '13px', color: '#cbd5e1', flex: 1 }}>{s}</span>
+                <span style={{ fontSize: '13px', color: 'var(--text-2)', flex: 1, lineHeight: 1.4 }}>{s}</span>
                 <button
                   onClick={() => onSpeak(s)}
                   title="Speak"
@@ -286,11 +344,10 @@ export function SentencePanel({
                     flexShrink: 0,
                     background: 'none',
                     border: 'none',
-                    color: '#64748b',
+                    color: 'var(--text-3)',
                     fontSize: '14px',
-                    cursor: 'pointer',
                     padding: '2px 4px',
-                    borderRadius: '4px',
+                    borderRadius: 'var(--r-sm)',
                   }}
                 >
                   🔊
@@ -301,26 +358,26 @@ export function SentencePanel({
         </div>
       )}
 
-      {/* ── Controls ──────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {/* ── Controls ──────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={onBuild}
             disabled={isProcessing || bufferDisplay.length === 0}
             style={{
               flex: 1,
-              padding: '9px 16px',
-              borderRadius: '8px',
-              background: isProcessing || bufferDisplay.length === 0 ? '#1e293b' : '#1D9E75',
-              color: isProcessing || bufferDisplay.length === 0 ? '#4b5563' : '#ffffff',
-              border: 'none',
+              padding: '10px 16px',
+              borderRadius: 'var(--r-md)',
+              background: isProcessing || bufferDisplay.length === 0 ? 'var(--surface-2)' : 'var(--primary)',
+              color: isProcessing || bufferDisplay.length === 0 ? 'var(--text-3)' : '#ffffff',
+              border: `1px solid ${isProcessing || bufferDisplay.length === 0 ? 'var(--border)' : 'var(--primary)'}`,
               fontSize: '13px',
-              fontWeight: 600,
-              cursor: isProcessing || bufferDisplay.length === 0 ? 'not-allowed' : 'pointer',
+              fontWeight: 500,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px',
+              gap: '7px',
+              cursor: isProcessing || bufferDisplay.length === 0 ? 'not-allowed' : 'pointer',
             }}
           >
             {isProcessing ? (
@@ -330,13 +387,13 @@ export function SentencePanel({
                     width: '12px',
                     height: '12px',
                     border: '2px solid rgba(255,255,255,0.3)',
-                    borderTopColor: '#ffffff',
+                    borderTopColor: 'var(--text-3)',
                     borderRadius: '50%',
                     animation: 'spin 0.7s linear infinite',
                     display: 'inline-block',
                   }}
                 />
-                Building...
+                Building…
               </>
             ) : (
               'Build sentence'
@@ -346,40 +403,39 @@ export function SentencePanel({
           <button
             onClick={onClear}
             style={{
-              padding: '9px 16px',
-              borderRadius: '8px',
+              padding: '10px 16px',
+              borderRadius: 'var(--r-md)',
               background: 'transparent',
-              color: '#64748b',
-              border: '1px solid #334155',
+              color: 'var(--text-3)',
+              border: '1px solid var(--border)',
               fontSize: '13px',
-              cursor: 'pointer',
             }}
           >
             Clear
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-          <span style={{ fontSize: '10px', color: '#4b5563' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-3)' }}>
             or pause 3s to auto-build
           </span>
-          <span style={{ fontSize: '10px', color: '#374151', textAlign: 'center', lineHeight: 1.5 }}>
-            Spell words letter-by-letter · use{' '}
+          <span style={{ fontSize: '10px', color: 'var(--border-2)', textAlign: 'center', lineHeight: 1.6 }}>
+            Spell letter-by-letter ·{' '}
             <span style={{
-              background: 'rgba(29,158,117,0.15)',
-              color: '#86efac',
-              borderRadius: '4px',
+              background: 'var(--primary-dim)',
+              color: 'var(--primary)',
+              borderRadius: 'var(--r-sm)',
               padding: '1px 5px',
               fontFamily: 'monospace',
               fontSize: '10px',
             }}>
               SPACE
             </span>
-            {' '}gesture between words ·{' '}
+            {' '}between words ·{' '}
             <span style={{
-              background: 'rgba(124,58,237,0.15)',
-              color: '#c4b5fd',
-              borderRadius: '4px',
+              background: 'var(--amber-dim)',
+              color: 'var(--amber)',
+              borderRadius: 'var(--r-sm)',
               padding: '1px 5px',
               fontFamily: 'monospace',
               fontSize: '10px',

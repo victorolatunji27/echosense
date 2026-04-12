@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { GESTURE_MAP } from '../utils/gestureMap'
 import { HandDiagram } from './HandDiagram'
 
@@ -13,11 +13,13 @@ const GESTURES = [
 ]
 
 const LABELS: Record<string, string> = GESTURE_MAP
-const ROUND_SIZE = 5
 
-function pickQueue(): string[] {
-  const shuffled = [...GESTURES].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, ROUND_SIZE)
+function randomIndex(exclude: number): number {
+  let idx: number
+  do {
+    idx = Math.floor(Math.random() * GESTURES.length)
+  } while (idx === exclude && GESTURES.length > 1)
+  return idx
 }
 
 interface Props {
@@ -27,60 +29,70 @@ interface Props {
 }
 
 export function PracticeMode({ currentGesture, gestureScore, onExit }: Props) {
-  const [queue, setQueue] = useState<string[]>(() => pickQueue())
-  const [questionIndex, setQuestionIndex] = useState(0)
-  const [correct, setCorrect] = useState(0)
-  const [incorrect, setIncorrect] = useState(0)
-  const [feedback, setFeedback] = useState<'correct' | 'incorrect' | null>(null)
-  const [roundDone, setRoundDone] = useState(false)
+  const [targetIndex, setTargetIndex] = useState(() => Math.floor(Math.random() * GESTURES.length))
+  const [score, setScore] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [correct, setCorrect] = useState(false)
+  const [incorrect, setIncorrect] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
+  const [showNewQuestion, setShowNewQuestion] = useState(true)
+  const streakRef = useRef(0)
+  const [streak, setStreak] = useState(0)
 
-  const currentTarget = queue[questionIndex]
-  const progress = questionIndex + 1
+  const currentTarget = GESTURES[targetIndex]
 
+  function advanceTo(nextIndex: number) {
+    setTargetIndex(nextIndex)
+    setCorrect(false)
+    setIncorrect(false)
+    setIsTransitioning(false)
+    setShowNewQuestion(false)
+    setTimeout(() => setShowNewQuestion(true), 80)
+  }
+
+  // Detect correct/incorrect answers
   useEffect(() => {
-    if (feedback !== null) return
-    if (!currentTarget) return
+    if (isTransitioning) return
+    if (!currentGesture || currentGesture === 'None') return
 
     // Correct answer
-    if (currentGesture === currentTarget && gestureScore > 0.8) {
-      setFeedback('correct')
-      setCorrect((c) => c + 1)
-      const id = setTimeout(() => advance(), 1000)
-      return () => clearTimeout(id)
+    if (currentGesture === currentTarget && gestureScore > 0.8 && !correct) {
+      setCorrect(true)
+      setScore((s) => s + 1)
+      setTotal((t) => t + 1)
+      setIsTransitioning(true)
+      streakRef.current += 1
+      setStreak(streakRef.current)
+
+      setTimeout(() => {
+        advanceTo(randomIndex(targetIndex))
+      }, 1200)
     }
 
-    // Wrong answer — gesture held with high confidence but it's the wrong one
+    // Wrong answer — held with high confidence but wrong gesture
     if (
-      currentGesture !== null &&
-      currentGesture !== 'None' &&
       currentGesture !== currentTarget &&
-      gestureScore > 0.8
+      gestureScore > 0.8 &&
+      !correct &&
+      !incorrect
     ) {
-      setFeedback('incorrect')
-      setIncorrect((n) => n + 1)
-      const id = setTimeout(() => {
-        setFeedback(null)
+      setIncorrect(true)
+      setTotal((t) => t + 1)
+      streakRef.current = 0
+      setStreak(0)
+
+      setTimeout(() => {
+        setIncorrect(false)
       }, 800)
-      return () => clearTimeout(id)
     }
   }, [currentGesture, gestureScore])
 
-  function advance() {
-    setFeedback(null)
-    if (questionIndex + 1 >= ROUND_SIZE) {
-      setRoundDone(true)
-    } else {
-      setQuestionIndex((i) => i + 1)
-    }
-  }
-
-  function restart() {
-    setQueue(pickQueue())
-    setQuestionIndex(0)
-    setCorrect(0)
-    setIncorrect(0)
-    setFeedback(null)
-    setRoundDone(false)
+  function handleSkip() {
+    if (isTransitioning) return
+    setTotal((t) => t + 1)
+    streakRef.current = 0
+    setStreak(0)
+    advanceTo(randomIndex(targetIndex))
   }
 
   return (
@@ -88,7 +100,8 @@ export function PracticeMode({ currentGesture, gestureScore, onExit }: Props) {
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(15,23,42,0.95)',
+        background: 'rgba(247,245,242,0.96)',
+        backdropFilter: 'blur(8px)',
         zIndex: 50,
         display: 'flex',
         flexDirection: 'column',
@@ -97,7 +110,7 @@ export function PracticeMode({ currentGesture, gestureScore, onExit }: Props) {
         gap: '20px',
       }}
     >
-      {/* Exit button */}
+      {/* Exit */}
       <button
         onClick={onExit}
         style={{
@@ -105,179 +118,175 @@ export function PracticeMode({ currentGesture, gestureScore, onExit }: Props) {
           top: '20px',
           right: '24px',
           fontSize: '12px',
-          padding: '6px 14px',
-          borderRadius: '6px',
-          border: '1px solid #334155',
-          background: 'transparent',
-          color: '#94a3b8',
-          cursor: 'pointer',
+          padding: '6px 16px',
+          borderRadius: 'var(--r-pill)',
+          border: '1px solid var(--border)',
+          background: 'var(--surface)',
+          color: 'var(--text-3)',
+          letterSpacing: '0.02em',
         }}
       >
         Exit Practice
       </button>
 
-      {/* Header */}
-      <div style={{ fontSize: '12px', textTransform: 'uppercase', color: '#1D9E75', letterSpacing: '0.08em' }}>
+      {/* Section label */}
+      <div
+        style={{
+          fontSize: '10px',
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+          color: 'var(--primary)',
+          fontWeight: 500,
+        }}
+      >
         Practice Mode
       </div>
 
-      {roundDone ? (
-        /* ── Round complete screen ── */
+      {/* Score + streak */}
+      <div style={{ display: 'flex', gap: '16px', fontSize: '13px', alignItems: 'center' }}>
+        <span style={{ color: 'var(--primary)', fontWeight: 500 }}>✓ {score} correct</span>
+        <span style={{ color: 'var(--text-3)' }}>· {total} attempts</span>
+        {streak >= 3 && (
+          <span style={{ fontSize: '12px', color: 'var(--amber)', fontWeight: 600 }}>
+            🔥 {streak} streak
+          </span>
+        )}
+      </div>
+
+      {/* Target card */}
+      <div
+        style={{
+          position: 'relative',
+          background: 'var(--surface)',
+          borderRadius: 'var(--r-lg)',
+          padding: '36px 52px',
+          textAlign: 'center',
+          minWidth: '280px',
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-card)',
+        }}
+      >
         <div
           style={{
-            background: '#ffffff',
-            borderRadius: '16px',
-            padding: '40px 48px',
-            textAlign: 'center',
-            minWidth: '280px',
+            fontSize: '11px',
+            color: 'var(--text-3)',
+            marginBottom: '12px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
           }}
         >
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>
-            {incorrect === 0 ? '🏆' : correct >= 4 ? '🎉' : '💪'}
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginBottom: '4px' }}>
-            Round complete!
-          </div>
-          <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '24px' }}>
-            {correct} / {ROUND_SIZE} correct · {incorrect} incorrect
-          </div>
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-            <button
-              onClick={restart}
-              style={{
-                padding: '10px 24px',
-                borderRadius: '8px',
-                background: '#1D9E75',
-                color: '#ffffff',
-                border: 'none',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer',
-              }}
-            >
-              Try again
-            </button>
-            <button
-              onClick={onExit}
-              style={{
-                padding: '10px 24px',
-                borderRadius: '8px',
-                background: 'transparent',
-                color: '#64748b',
-                border: '1px solid #e2e8f0',
-                fontSize: '13px',
-                cursor: 'pointer',
-              }}
-            >
-              Exit
-            </button>
-          </div>
+          Sign this
         </div>
-      ) : (
-        <>
-          {/* Progress + score row */}
-          <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
-            {/* Progress dots */}
-            <div style={{ display: 'flex', gap: '6px' }}>
-              {queue.map((_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '50%',
-                    background:
-                      i < questionIndex
-                        ? '#1D9E75'
-                        : i === questionIndex
-                        ? '#ffffff'
-                        : '#334155',
-                    transition: 'background 0.3s',
-                  }}
-                />
-              ))}
-            </div>
-            <div style={{ fontSize: '12px', color: '#64748b' }}>
-              Question {progress} of {ROUND_SIZE}
-            </div>
-          </div>
 
-          {/* Correct / incorrect tally */}
-          <div style={{ display: 'flex', gap: '16px', fontSize: '13px' }}>
-            <span style={{ color: '#1D9E75' }}>✓ {correct}</span>
-            <span style={{ color: '#ef4444' }}>✗ {incorrect}</span>
-          </div>
-
-          {/* Target card */}
+        <div
+          key={targetIndex}
+          style={{
+            animation: showNewQuestion
+              ? 'signPop 0.3s cubic-bezier(0.34,1.56,0.64,1)'
+              : 'none',
+          }}
+        >
           <div
             style={{
-              position: 'relative',
-              background: '#ffffff',
-              borderRadius: '16px',
-              padding: '32px 48px',
-              textAlign: 'center',
-              minWidth: '260px',
+              display: 'flex',
+              justifyContent: 'center',
+              marginBottom: '12px',
+              animation: 'handIn 0.2s ease-out',
             }}
           >
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>Sign this:</div>
-            <div
-              key={currentTarget}
-              style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px',
-                       animation: 'handIn 0.2s ease-out' }}
-            >
-              <HandDiagram gestureKey={currentTarget} size="lg" />
-            </div>
-            <div style={{ fontSize: '36px', fontWeight: 700, color: '#0f172a' }}>
-              {LABELS[currentTarget]}
-            </div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '8px' }}>{currentTarget}</div>
-
-            {/* Correct overlay — green checkmark */}
-            {feedback === 'correct' && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '16px',
-                  background: 'rgba(240,253,244,0.92)',
-                  fontSize: '72px',
-                  animation: 'scaleIn 0.2s ease-out',
-                }}
-              >
-                ✓
-              </div>
-            )}
-
-            {/* Incorrect overlay — red X */}
-            {feedback === 'incorrect' && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '16px',
-                  background: 'rgba(254,242,242,0.92)',
-                  fontSize: '72px',
-                  animation: 'scaleIn 0.2s ease-out',
-                }}
-              >
-                ✗
-              </div>
-            )}
+            <HandDiagram gestureKey={currentTarget} size="lg" />
           </div>
+          <div
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontSize: '40px',
+              fontStyle: 'italic',
+              color: 'var(--primary)',
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+            }}
+          >
+            {LABELS[currentTarget]}
+          </div>
+        </div>
 
-          {/* Hint: what gesture is being detected */}
-          {currentGesture && currentGesture !== 'None' && feedback === null && (
-            <div style={{ fontSize: '12px', color: '#475569' }}>
-              Detecting: <span style={{ color: '#94a3b8' }}>{LABELS[currentGesture] || currentGesture}</span>
-            </div>
-          )}
-        </>
+        <div
+          style={{
+            fontSize: '11px',
+            color: 'var(--text-3)',
+            marginTop: '8px',
+            fontFamily: 'monospace',
+          }}
+        >
+          {currentTarget}
+        </div>
+
+        {/* Correct overlay */}
+        {correct && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 'var(--r-lg)',
+              background: 'rgba(240,253,244,0.94)',
+              fontSize: '72px',
+              animation: 'scaleIn 0.2s ease-out',
+              color: '#16a34a',
+            }}
+          >
+            ✓
+          </div>
+        )}
+
+        {/* Incorrect overlay */}
+        {incorrect && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 'var(--r-lg)',
+              background: 'rgba(254,242,242,0.94)',
+              fontSize: '72px',
+              animation: 'scaleIn 0.2s ease-out',
+              color: 'var(--red)',
+            }}
+          >
+            ✗
+          </div>
+        )}
+      </div>
+
+      {/* Skip button */}
+      <button
+        onClick={handleSkip}
+        disabled={isTransitioning}
+        style={{
+          fontSize: '12px',
+          padding: '6px 16px',
+          borderRadius: 'var(--r-pill)',
+          border: '1px solid var(--border)',
+          background: 'transparent',
+          color: isTransitioning ? 'var(--border)' : 'var(--text-3)',
+          cursor: isTransitioning ? 'not-allowed' : 'pointer',
+        }}
+      >
+        Skip →
+      </button>
+
+      {/* Detecting hint */}
+      {currentGesture && currentGesture !== 'None' && !correct && !incorrect && (
+        <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+          Detecting:{' '}
+          <span style={{ color: 'var(--text-2)', fontWeight: 500 }}>
+            {LABELS[currentGesture] || currentGesture}
+          </span>
+        </div>
       )}
     </div>
   )
