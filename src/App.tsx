@@ -54,6 +54,10 @@ function App() {
   const lstmClassifier = useLSTMClassifier()
   const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer } = useLandmarkBuffer()
 
+  // Declared before useGestureRecognizer, which reads them
+  const [practiceMode, setPracticeMode] = useState(false)
+  const [mode, setMode] = useState<'phrase' | 'spell' | 'sentence'>('phrase')
+
   const { landmarks, gestureName, gestureScore, isLoaded, source, isUnsure } = useGestureRecognizer(
     videoRef as React.RefObject<HTMLVideoElement>,
     {
@@ -63,6 +67,9 @@ function App() {
       lstmAvailable: lstmClassifier.isAvailable,
       getLandmarkBuffer: getBuffer,
       isBufferReady,
+      // Phrase and practice modes only consume the 7 MediaPipe built-ins;
+      // without this, confident CNN letter reads (fist = A/S/E…) shadow them
+      prioritizeMediaPipe: mode === 'phrase' || practiceMode,
     },
   )
   const { transcript, addPhrase, clearTranscript } = useTranscript()
@@ -71,13 +78,11 @@ function App() {
 
   const [copied, setCopied] = useState(false)
   const [flashText, setFlashText] = useState<string | null>(null)
-  const [practiceMode, setPracticeMode] = useState(false)
   const [sharedTranscriptLoaded, setSharedTranscriptLoaded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [signCount, setSignCount] = useState(0)
   const [sensitivity, setSensitivity] = useState<'fast' | 'medium' | 'slow'>('medium')
   const [selectedVoiceId, setSelectedVoiceId] = useState(VOICES[0].id)
-  const [mode, setMode] = useState<'phrase' | 'spell' | 'sentence'>('phrase')
   const [showAbout, setShowAbout] = useState(false)
   const [showReference, setShowReference] = useState(false)
   const [holdProgress, setHoldProgress] = useState(0)
@@ -410,7 +415,9 @@ function App() {
   function handleShare() {
     if (transcript.length === 0) return
     const raw = transcript.join('\n')
-    const encoded = btoa(encodeURIComponent(raw))
+    // encodeURIComponent the base64 too: bare '+' / '=' in a query string
+    // get mangled by URLSearchParams on read and break atob()
+    const encoded = encodeURIComponent(btoa(encodeURIComponent(raw)))
     const url = window.location.origin + window.location.pathname + '?transcript=' + encoded
     navigator.clipboard.writeText(url)
   }

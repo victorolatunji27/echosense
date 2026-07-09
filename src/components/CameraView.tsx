@@ -1,5 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { useCamera } from '../hooks/useCamera'
+import { useCamera, type CameraErrorKind } from '../hooks/useCamera'
+
+const CAMERA_ERROR_COPY: Record<CameraErrorKind, { title: string; body: string }> = {
+  denied: {
+    title: 'Camera access blocked',
+    body: "Click the camera icon in your browser's address bar and select Allow, then try again.",
+  },
+  'not-found': {
+    title: 'No camera found',
+    body: 'Connect a webcam (or enable your built-in camera), then try again.',
+  },
+  'in-use': {
+    title: 'Camera is busy',
+    body: 'Another app or browser tab is using your camera. Close it, then try again.',
+  },
+  unknown: {
+    title: 'Camera unavailable',
+    body: 'Something went wrong while starting the camera. Try again.',
+  },
+}
 
 const CONNECTIONS: [number, number][] = [
   [0,1],[1,2],[2,3],[3,4],
@@ -24,7 +43,7 @@ interface Props {
 }
 
 export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, currentLetter, isLocked, onReady }: Props) {
-  const { videoRef, isReady, error } = useCamera()
+  const { videoRef, isReady, error, retry } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   // Arc fade-out after commit
@@ -112,13 +131,13 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
             <line x1="8" y1="8" x2="40" y2="40" stroke="rgba(192,57,43,0.7)" strokeWidth="2.5" strokeLinecap="round"/>
           </svg>
           <div style={{ fontSize: '15px', fontWeight: 500, color: '#F0A876' }}>
-            Camera access blocked
+            {CAMERA_ERROR_COPY[error].title}
           </div>
           <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', maxWidth: '280px', lineHeight: 1.6 }}>
-            Click the camera icon in your browser's address bar and select Allow, then try again.
+            {CAMERA_ERROR_COPY[error].body}
           </div>
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             style={{
               marginTop: '4px',
               padding: '9px 22px',

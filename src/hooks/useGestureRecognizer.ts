@@ -86,6 +86,10 @@ interface GestureRecognizerOptions {
   // Landmark buffer for LSTM
   getLandmarkBuffer?: () => Landmark[][]
   isBufferReady?: () => boolean
+  // Rank MediaPipe built-ins above the CNN. Phrase and practice modes only
+  // consume the 7 built-in gestures, and CNN letter predictions (a fist is
+  // also A/S/E…) would otherwise shadow them.
+  prioritizeMediaPipe?: boolean
 }
 
 // Dev-only tier logging — logs when the winning tier/gesture changes so we
@@ -123,6 +127,7 @@ export function useGestureRecognizer(
     lstmAvailable = false,
     getLandmarkBuffer,
     isBufferReady,
+    prioritizeMediaPipe = false,
   } = options
 
   const recognizerRef = useRef<GestureRecognizer | null>(null)
@@ -141,6 +146,7 @@ export function useGestureRecognizer(
   const isBufferReadyRef = useRef(isBufferReady)
   const cnnAvailableRef = useRef(cnnAvailable)
   const lstmAvailableRef = useRef(lstmAvailable)
+  const prioritizeMediaPipeRef = useRef(prioritizeMediaPipe)
 
   useEffect(() => { cnnClassifyRef.current = cnnClassify }, [cnnClassify])
   useEffect(() => { lstmClassifyRef.current = lstmClassify }, [lstmClassify])
@@ -148,6 +154,7 @@ export function useGestureRecognizer(
   useEffect(() => { isBufferReadyRef.current = isBufferReady }, [isBufferReady])
   useEffect(() => { cnnAvailableRef.current = cnnAvailable }, [cnnAvailable])
   useEffect(() => { lstmAvailableRef.current = lstmAvailable }, [lstmAvailable])
+  useEffect(() => { prioritizeMediaPipeRef.current = prioritizeMediaPipe }, [prioritizeMediaPipe])
 
   // Latest CNN inference state (written by the async classify, read by the
   // synchronous rAF loop)
@@ -246,16 +253,22 @@ export function useGestureRecognizer(
             ? lstmClassifyRef.current(getLandmarkBufferRef.current())
             : null
         const cnnResult = cnnResultRef.current
+        const mediapipeFires =
+          !!mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)
 
         if (lstmResult) {
           // 1. LSTM (highest priority — motion overrides static)
           raw = { name: lstmResult.gestureKey, score: lstmResult.confidence, source: 'lstm' }
+        } else if (mediapipeFires && prioritizeMediaPipeRef.current) {
+          // 2a. MediaPipe built-in first when the consumer only wants the
+          //     7 built-ins (phrase/practice) — CNN letters would shadow them
+          raw = { name: mediapipeGesture!, score, source: 'mediapipe' }
         } else if (rawLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
           // 2. CNN (trained image classifier — most recent fresh result)
           raw = { name: cnnResult.gestureKey, score: cnnResult.confidence, source: 'cnn' }
-        } else if (mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)) {
+        } else if (mediapipeFires) {
           // 3. MediaPipe built-in
-          raw = { name: mediapipeGesture, score, source: 'mediapipe' }
+          raw = { name: mediapipeGesture!, score, source: 'mediapipe' }
         } else if (rawLandmarks) {
           // 4. Geometric classifier (always available)
           const geometric = classifyASLGesture(rawLandmarks)
