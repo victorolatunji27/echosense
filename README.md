@@ -10,7 +10,7 @@ Built at **BitCamp 2026** — University of Maryland's annual hackathon.
 
 ## Live Demo
 
-**[echosense-lyart.vercel.app](echosense-lyart.vercel.app)**
+**[echosense-lyart.vercel.app](https://echosense-lyart.vercel.app)**
 
 ---
 
