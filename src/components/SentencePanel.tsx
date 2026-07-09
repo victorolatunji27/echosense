@@ -17,6 +17,8 @@ interface Props {
   onSpeak: (text: string) => void
   currentGesture: string | null
   displayText: string
+  // Hand visible but recent predictions disagree — show a soft hint
+  isUnsure?: boolean
 }
 
 function isLetterToken(t: string): boolean {
@@ -39,6 +41,7 @@ export function SentencePanel({
   onSpeak,
   currentGesture,
   displayText,
+  isUnsure = false,
 }: Props) {
   // Shared box style used by both Original and Suggestion rows.
   const sentenceBoxStyle: React.CSSProperties = {
@@ -166,7 +169,11 @@ export function SentencePanel({
               lineHeight: 1.1,
             }}
           >
-            {hasLiveGesture ? displayText : isActive ? '—' : 'Press Start to begin'}
+            {hasLiveGesture
+              ? displayText
+              : isActive
+              ? (isUnsure ? 'Didn’t catch that — try again' : '—')
+              : 'Press Start to begin'}
           </div>
         </div>
 

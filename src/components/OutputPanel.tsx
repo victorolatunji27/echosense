@@ -15,6 +15,8 @@ interface Props {
   currentGesture: string | null
   displayText: string
   confidence: number
+  // Hand visible but recent predictions disagree — show a soft hint
+  isUnsure?: boolean
   transcript: string[]
   isSpeaking: boolean
   copied: boolean
@@ -50,6 +52,7 @@ export function OutputPanel({
   currentGesture,
   displayText,
   confidence,
+  isUnsure = false,
   transcript,
   isSpeaking,
   copied,
@@ -109,7 +112,22 @@ export function OutputPanel({
           Now detecting
         </div>
 
-        {showWaitingForPhrase ? (
+        {isUnsure && !displayText ? (
+          <div
+            aria-live="polite"
+            style={{
+              fontFamily: 'var(--font-ui)',
+              fontSize: '18px',
+              fontStyle: 'italic',
+              color: 'var(--text-3)',
+              minHeight: '92px',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            Didn't catch that — try again
+          </div>
+        ) : showWaitingForPhrase ? (
           <div
             style={{
               fontFamily: 'var(--font-ui)',

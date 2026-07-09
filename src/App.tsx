@@ -54,7 +54,7 @@ function App() {
   const lstmClassifier = useLSTMClassifier()
   const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer } = useLandmarkBuffer()
 
-  const { landmarks, gestureName, gestureScore, isLoaded, source } = useGestureRecognizer(
+  const { landmarks, gestureName, gestureScore, isLoaded, source, isUnsure } = useGestureRecognizer(
     videoRef as React.RefObject<HTMLVideoElement>,
     {
       cnnClassify: cnnClassifier.classify,
@@ -777,11 +777,13 @@ function App() {
               onSpeak={(text) => speak(text, selectedVoiceId)}
               currentGesture={gestureName}
               displayText={rawDisplay}
+              isUnsure={isUnsure}
             />
           ) : (
             <OutputPanel
               currentGesture={gestureName}
               displayText={displayText}
+              isUnsure={isUnsure}
               confidence={gestureScore}
               transcript={transcript}
               isSpeaking={isSpeaking}

@@ -17,6 +17,65 @@ export type GestureSource = 'lstm' | 'cnn' | 'mediapipe' | 'geometric' | null
 const CNN_INTERVAL_MS = 120
 const CNN_RESULT_TTL_MS = 400
 
+// Prediction smoothing: a gesture is only surfaced when at least
+// SMOOTHING_MIN_AGREEMENT of the last SMOOTHING_WINDOW per-frame
+// predictions agree. 4 agreeing frames is ~66ms at 60fps / ~133ms at
+// 30fps, keeping added latency under ~150ms.
+const SMOOTHING_WINDOW = 7
+const SMOOTHING_MIN_AGREEMENT = 4
+
+export interface RawPrediction {
+  name: string
+  score: number
+  source: GestureSource
+}
+
+export type SmoothedPrediction =
+  | { kind: 'gesture'; name: string; score: number; source: GestureSource }
+  | { kind: 'none' }
+  | { kind: 'unsure' }
+
+/**
+ * Majority vote over the rolling per-frame prediction window.
+ * - a non-'None' gesture with >= minAgreement votes wins
+ * - consistently 'None' (or a window still filling up) is a quiet no-gesture
+ * - otherwise the frames disagree: explicit "unsure" instead of a guess
+ */
+export function tallyVotes(
+  votes: RawPrediction[],
+  minAgreement: number = SMOOTHING_MIN_AGREEMENT,
+): SmoothedPrediction {
+  const counts = new Map<string, number>()
+  for (const v of votes) {
+    counts.set(v.name, (counts.get(v.name) ?? 0) + 1)
+  }
+
+  let winner: string | null = null
+  let winnerCount = 0
+  for (const [name, count] of counts) {
+    if (name !== 'None' && count > winnerCount) {
+      winner = name
+      winnerCount = count
+    }
+  }
+
+  if (winner && winnerCount >= minAgreement) {
+    // Most recent vote for the winner, so score/source reflect the tier
+    // that actually produced it
+    for (let i = votes.length - 1; i >= 0; i--) {
+      if (votes[i].name === winner) {
+        const { name, score, source } = votes[i]
+        return { kind: 'gesture', name, score, source }
+      }
+    }
+  }
+
+  if ((counts.get('None') ?? 0) >= minAgreement || votes.length < minAgreement) {
+    return { kind: 'none' }
+  }
+  return { kind: 'unsure' }
+}
+
 interface GestureRecognizerOptions {
   // Optional CNN classifier — used when model files are present
   cnnClassify?: (video: HTMLVideoElement, landmarks: Landmark[]) => Promise<CNNPrediction | null>
@@ -48,6 +107,9 @@ interface GestureResult {
   gestureScore: number
   isLoaded: boolean
   source: GestureSource
+  // A hand is in frame but recent predictions disagree — the UI should
+  // show a soft "didn't catch that" hint instead of a guess.
+  isUnsure: boolean
 }
 
 export function useGestureRecognizer(
@@ -70,6 +132,7 @@ export function useGestureRecognizer(
   const [gestureName, setGestureName] = useState<string | null>(null)
   const [gestureScore, setGestureScore] = useState(0)
   const [source, setSource] = useState<GestureSource>(null)
+  const [isUnsure, setIsUnsure] = useState(false)
 
   // Keep latest option refs so the rAF loop always reads current values
   const cnnClassifyRef = useRef(cnnClassify)
@@ -91,6 +154,9 @@ export function useGestureRecognizer(
   const cnnBusyRef = useRef(false)
   const cnnLastKickRef = useRef(0)
   const cnnResultRef = useRef<(CNNPrediction & { at: number }) | null>(null)
+
+  // Rolling buffer of per-frame raw predictions for majority-vote smoothing
+  const voteBufferRef = useRef<RawPrediction[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -169,57 +235,68 @@ export function useGestureRecognizer(
           cnnResultRef.current = null
         }
 
-        // 1. LSTM (highest priority — motion overrides static)
-        if (
+        // Pick this frame's raw prediction from the highest tier that fires
+        let raw: RawPrediction = { name: 'None', score: 0, source: null }
+
+        const lstmResult =
           lstmAvailableRef.current &&
           lstmClassifyRef.current &&
           isBufferReadyRef.current?.() &&
           getLandmarkBufferRef.current
-        ) {
-          const lstmResult = lstmClassifyRef.current(getLandmarkBufferRef.current())
-          if (lstmResult) {
-            setGestureName(lstmResult.gestureKey)
-            setGestureScore(lstmResult.confidence)
-            setSource('lstm')
-            logTier('lstm', lstmResult.gestureKey, lstmResult.confidence)
-            rafRef.current = requestAnimationFrame(loop)
-            return
+            ? lstmClassifyRef.current(getLandmarkBufferRef.current())
+            : null
+        const cnnResult = cnnResultRef.current
+
+        if (lstmResult) {
+          // 1. LSTM (highest priority — motion overrides static)
+          raw = { name: lstmResult.gestureKey, score: lstmResult.confidence, source: 'lstm' }
+        } else if (rawLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
+          // 2. CNN (trained image classifier — most recent fresh result)
+          raw = { name: cnnResult.gestureKey, score: cnnResult.confidence, source: 'cnn' }
+        } else if (mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)) {
+          // 3. MediaPipe built-in
+          raw = { name: mediapipeGesture, score, source: 'mediapipe' }
+        } else if (rawLandmarks) {
+          // 4. Geometric classifier (always available)
+          const geometric = classifyASLGesture(rawLandmarks)
+          raw = {
+            name: geometric ?? 'None',
+            score: geometric ? 0.85 : 0,
+            source: geometric ? 'geometric' : null,
           }
         }
 
-        // 2. CNN (trained image classifier — most recent fresh result)
-        const cnnResult = cnnResultRef.current
-        if (rawLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
-          setGestureName(cnnResult.gestureKey)
-          setGestureScore(cnnResult.confidence)
-          setSource('cnn')
-          logTier('cnn', cnnResult.gestureKey, cnnResult.confidence)
-          rafRef.current = requestAnimationFrame(loop)
-          return
-        }
+        logTier(raw.source, raw.name, raw.score)
 
-        // 3. MediaPipe built-in
-        if (mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)) {
-          setGestureName(mediapipeGesture)
-          setGestureScore(score)
-          setSource('mediapipe')
-          logTier('mediapipe', mediapipeGesture, score)
-          rafRef.current = requestAnimationFrame(loop)
-          return
-        }
+        // ── Majority-vote smoothing ───────────────────────────────────────
+        //
+        // Surface a gesture only when most recent frames agree; while a hand
+        // is visible but predictions disagree, report an explicit "unsure"
+        // state instead of a guess. This applies to every tier.
 
-        // 4. Geometric classifier (always available)
-        if (rawLandmarks) {
-          const geometric = classifyASLGesture(rawLandmarks)
-          setGestureName(geometric ?? 'None')
-          setGestureScore(geometric ? 0.85 : 0)
-          setSource(geometric ? 'geometric' : null)
-          logTier(geometric ? 'geometric' : null, geometric ?? 'None', geometric ? 0.85 : 0)
-        } else {
+        if (!rawLandmarks) {
+          voteBufferRef.current = []
           setGestureName('None')
           setGestureScore(0)
           setSource(null)
-          logTier(null, 'None', 0)
+          setIsUnsure(false)
+        } else {
+          const votes = voteBufferRef.current
+          votes.push(raw)
+          if (votes.length > SMOOTHING_WINDOW) votes.shift()
+
+          const smoothed = tallyVotes(votes)
+          if (smoothed.kind === 'gesture') {
+            setGestureName(smoothed.name)
+            setGestureScore(smoothed.score)
+            setSource(smoothed.source)
+            setIsUnsure(false)
+          } else {
+            setGestureName('None')
+            setGestureScore(0)
+            setSource(null)
+            setIsUnsure(smoothed.kind === 'unsure')
+          }
         }
       }
       rafRef.current = requestAnimationFrame(loop)
@@ -229,5 +306,5 @@ export function useGestureRecognizer(
     return () => cancelAnimationFrame(rafRef.current)
   }, [isLoaded, videoRef])
 
-  return { landmarks, gestureName, gestureScore, isLoaded, source }
+  return { landmarks, gestureName, gestureScore, isLoaded, source, isUnsure }
 }
