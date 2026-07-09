@@ -168,11 +168,20 @@ npm install
 Create a `.env.local` file in the project root:
 
 ```env
-VITE_ANTHROPIC_KEY=your_anthropic_api_key_here
-VITE_ELEVENLABS_KEY=your_elevenlabs_api_key_here
+# Server-side keys — used only by the /api serverless functions.
+# No VITE_ prefix: they are never shipped to the browser.
+ANTHROPIC_KEY=your_anthropic_api_key_here
+ELEVENLABS_KEY=your_elevenlabs_api_key_here
+
+# Auth0 SPA config — public by design, safe to expose to the browser.
 VITE_AUTH0_DOMAIN=your-tenant.auth0.com
 VITE_AUTH0_CLIENT_ID=your_auth0_client_id_here
 ```
+
+All Anthropic and ElevenLabs calls go through Vercel serverless functions
+(`/api/anthropic` and `/api/tts`) that hold the keys server-side, enforce a
+request size cap, a per-IP rate limit, and a model allowlist. The browser
+never sees either key.
 
 > **Never commit `.env.local` to version control.** It is already excluded by `.gitignore`.
 
@@ -191,6 +200,11 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173). Click Allow when the browser requests camera permission.
 
+> `npm run dev` (plain Vite) does not run the `/api` serverless functions —
+> AI autocorrect/sentence evaluation fall back to their offline rules and TTS
+> falls back to Web Speech. To exercise the full proxy path locally, run
+> `npx vercel dev` instead.
+
 ### Production build
 
 ```bash
@@ -203,7 +217,10 @@ npm run build
 npx vercel --prod
 ```
 
-Add all four environment variables in the Vercel dashboard under Project Settings → Environment Variables before deploying.
+Add all four environment variables in the Vercel dashboard under Project
+Settings → Environment Variables before deploying: `ANTHROPIC_KEY` and
+`ELEVENLABS_KEY` (server-side, consumed by the `/api` functions) plus
+`VITE_AUTH0_DOMAIN` and `VITE_AUTH0_CLIENT_ID` (public SPA config).
 
 ---
 
@@ -211,6 +228,9 @@ Add all four environment variables in the Vercel dashboard under Project Setting
 
 ```
 echosense/
+├── api/
+│   ├── anthropic.ts      # Serverless proxy → Anthropic Messages API
+│   └── tts.ts            # Serverless proxy → ElevenLabs TTS (streams audio)
 ├── public/
 │   └── models/
 │       ├── cnn/          # Drop trained CNN model files here

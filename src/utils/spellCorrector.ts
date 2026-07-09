@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { createClaudeMessage } from './anthropicProxy'
 
 // ── Small common-word dictionary for the fast-path ─────────────────
 const COMMON_WORDS = new Set([
@@ -56,15 +56,7 @@ export async function autocorrectWord(raw: string): Promise<string> {
     return titleCase(trimmed)
   }
 
-  // Strategy 2 — Anthropic API correction
-  const apiKey = import.meta.env.VITE_ANTHROPIC_KEY as string | undefined
-
-  if (!apiKey) {
-    return offlineFallback(trimmed)
-  }
-
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
-
+  // Strategy 2 — Claude correction via the serverless proxy
   const prompt = `A user spelled this word using ASL finger spelling (letter by letter):
 "${trimmed}"
 
@@ -76,17 +68,7 @@ If the letters genuinely spell a real word already, return that word.
 If no reasonable word can be inferred, return the original string capitalized.`
 
   try {
-    const msg = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 20,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    const text = msg.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
+    const text = (await createClaudeMessage(prompt, 20))
       // Strip quotes, punctuation, whitespace
       .replace(/^["'`]+|["'`.,!?]+$/g, '')
       .trim()

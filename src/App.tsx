@@ -21,8 +21,6 @@ import { AboutModal } from './components/AboutModal'
 import { AuthButton } from './components/AuthButton'
 import { ASLBackground } from './components/ASLBackground'
 
-const ELEVENLABS_KEY = import.meta.env.VITE_ELEVENLABS_KEY ?? ''
-
 const VOICES = [
   { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel' },
   { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella' },
@@ -69,7 +67,7 @@ function App() {
     },
   )
   const { transcript, addPhrase, clearTranscript } = useTranscript()
-  const { speak, isSpeaking } = useTTS(ELEVENLABS_KEY)
+  const { speak, isSpeaking } = useTTS()
   const sentenceBuilder = useSentenceBuilder(getAccessToken)
 
   const [copied, setCopied] = useState(false)

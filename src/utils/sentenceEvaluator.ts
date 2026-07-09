@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { createClaudeMessage } from './anthropicProxy'
 import type { ParsedPhrase } from './signParser'
 
 // ── FAST_MAP — instant responses for common single/double signs ─────
@@ -289,35 +289,8 @@ export async function evaluateToSentence(
   const reverseKey = [...parsed.aslTokens].reverse().join(' ')
   if (FAST_MAP[reverseKey]) return FAST_MAP[reverseKey]
 
-  const apiKey = import.meta.env.VITE_ANTHROPIC_KEY as string | undefined
-
-  if (!apiKey) {
-    console.warn('[SentenceEvaluator] VITE_ANTHROPIC_KEY not set — using fallback')
-    return buildFallbackSentence(parsed)
-  }
-
-  // Auth0 — if the caller passed an access token, attach it as a custom
-  // header. Proves the AI agent call originated from an authenticated
-  // EchoSense session (Auth0 for AI Agents).
-  const defaultHeaders: Record<string, string> = {}
-  if (accessToken) {
-    defaultHeaders['X-Auth-Token'] = accessToken
-  }
-
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, defaultHeaders })
-
   try {
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 80,
-      messages: [{ role: 'user', content: buildPrompt(parsed) }],
-    })
-
-    const text = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
+    const text = (await createClaudeMessage(buildPrompt(parsed), 80, accessToken))
       .replace(/^["'`]+|["'`]+$/g, '')
       .trim()
 
@@ -435,29 +408,16 @@ export async function getTerpAISuggestions(
   rawTokens: string[],
   accessToken?: string,
 ): Promise<TerpAISuggestion[]> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_KEY as string | undefined
-
-  if (!apiKey || !originalSentence) {
+  if (!originalSentence) {
     return buildFallbackSuggestions(originalSentence)
   }
 
-  const defaultHeaders: Record<string, string> = {}
-  if (accessToken) defaultHeaders['X-Auth-Token'] = accessToken
-
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true, defaultHeaders })
-
   try {
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 300,
-      messages: [{ role: 'user', content: buildTerpAIPrompt(originalSentence, conversationHistory, rawTokens) }],
-    })
-
-    const raw = message.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
+    const raw = await createClaudeMessage(
+      buildTerpAIPrompt(originalSentence, conversationHistory, rawTokens),
+      300,
+      accessToken,
+    )
 
     // Strip accidental code-fences
     const cleaned = raw

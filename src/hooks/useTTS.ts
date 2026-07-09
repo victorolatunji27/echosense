@@ -4,16 +4,17 @@ import { useRef, useState, useEffect } from 'react'
  * useTTS — speaks a piece of text aloud.
  *
  * Strategy:
- *   1. If an ElevenLabs API key is configured, stream MP3 audio from
- *      ElevenLabs and play it through an <audio> element.
- *   2. On any ElevenLabs failure (missing key, non-2xx response,
- *      network error, audio decode error), fall back to the browser's
- *      built-in SpeechSynthesis API so the user always hears the text.
+ *   1. Stream MP3 audio from ElevenLabs via the /api/tts serverless
+ *      proxy (the API key lives server-side only) and play it through
+ *      an <audio> element.
+ *   2. On any proxy/ElevenLabs failure (non-2xx response, network
+ *      error, audio decode error), fall back to the browser's built-in
+ *      SpeechSynthesis API so the user always hears the text.
  *
  * `isSpeaking` reflects *any* active playback, including the Web
  * Speech fallback.
  */
-export function useTTS(apiKey: string) {
+export function useTTS() {
   const [isSpeaking, setIsSpeaking] = useState(false)
 
   const currentAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -74,34 +75,26 @@ export function useTTS(apiKey: string) {
 
   async function speakWithElevenLabs(text: string, voiceId: string): Promise<boolean> {
     try {
-      const res = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-        {
-          method: 'POST',
-          headers: {
-            'xi-api-key': apiKey,
-            'Content-Type': 'application/json',
-            Accept: 'audio/mpeg',
-          },
-          body: JSON.stringify({
-            text,
-            model_id: 'eleven_turbo_v2_5',
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-          }),
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
         },
-      )
+        body: JSON.stringify({ text, voiceId }),
+      })
 
       if (!res.ok) {
         const body = await res.text().catch(() => '')
         console.warn(
-          `[useTTS] ElevenLabs ${res.status} ${res.statusText} — ${body.slice(0, 200)}`,
+          `[useTTS] /api/tts ${res.status} ${res.statusText} — ${body.slice(0, 200)}`,
         )
         return false
       }
 
       const buffer = await res.arrayBuffer()
       if (buffer.byteLength === 0) {
-        console.warn('[useTTS] ElevenLabs returned empty buffer')
+        console.warn('[useTTS] /api/tts returned empty buffer')
         return false
       }
 
@@ -139,7 +132,7 @@ export function useTTS(apiKey: string) {
 
       return !decodeError
     } catch (err) {
-      console.warn('[useTTS] ElevenLabs fetch failed:', err)
+      console.warn('[useTTS] /api/tts fetch failed:', err)
       return false
     }
   }
@@ -151,12 +144,6 @@ export function useTTS(apiKey: string) {
     cleanupAudio()
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try { window.speechSynthesis.cancel() } catch { /* ignore */ }
-    }
-
-    // No ElevenLabs key → straight to Web Speech
-    if (!apiKey) {
-      speakWithWebSpeech(text)
-      return
     }
 
     // Optimistically flag speaking so the UI reacts instantly while
