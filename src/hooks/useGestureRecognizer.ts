@@ -11,9 +11,15 @@ const MEDIAPIPE_BUILTINS = new Set([
 
 export type GestureSource = 'lstm' | 'cnn' | 'mediapipe' | 'geometric' | null
 
+// CNN cadence: the rAF loop is synchronous but classify() is async, so we
+// kick off an inference at most every CNN_INTERVAL_MS and consume the most
+// recent result while it is still fresh.
+const CNN_INTERVAL_MS = 120
+const CNN_RESULT_TTL_MS = 400
+
 interface GestureRecognizerOptions {
   // Optional CNN classifier — used when model files are present
-  cnnClassify?: (video: HTMLVideoElement) => Promise<CNNPrediction | null>
+  cnnClassify?: (video: HTMLVideoElement, landmarks: Landmark[]) => Promise<CNNPrediction | null>
   cnnAvailable?: boolean
   // Optional LSTM classifier — highest priority when buffer is full
   lstmClassify?: (buffer: Landmark[][]) => LSTMPrediction | null
@@ -21,8 +27,19 @@ interface GestureRecognizerOptions {
   // Landmark buffer for LSTM
   getLandmarkBuffer?: () => Landmark[][]
   isBufferReady?: () => boolean
-  // Video element reference for CNN frame capture
-  videoElement?: HTMLVideoElement | null
+}
+
+// Dev-only tier logging — logs when the winning tier/gesture changes so we
+// can measure which classifier actually fires and at what confidence.
+let lastLoggedTier = ''
+function logTier(source: GestureSource, gesture: string | null, confidence: number) {
+  if (!import.meta.env.DEV) return
+  const key = `${source}:${gesture}`
+  if (key === lastLoggedTier) return
+  lastLoggedTier = key
+  console.debug(
+    `[recognizer] tier=${source ?? 'none'} gesture=${gesture ?? 'none'} conf=${confidence.toFixed(2)}`,
+  )
 }
 
 interface GestureResult {
@@ -44,7 +61,6 @@ export function useGestureRecognizer(
     lstmAvailable = false,
     getLandmarkBuffer,
     isBufferReady,
-    videoElement,
   } = options
 
   const recognizerRef = useRef<GestureRecognizer | null>(null)
@@ -60,7 +76,6 @@ export function useGestureRecognizer(
   const lstmClassifyRef = useRef(lstmClassify)
   const getLandmarkBufferRef = useRef(getLandmarkBuffer)
   const isBufferReadyRef = useRef(isBufferReady)
-  const videoElementRef = useRef(videoElement)
   const cnnAvailableRef = useRef(cnnAvailable)
   const lstmAvailableRef = useRef(lstmAvailable)
 
@@ -68,9 +83,14 @@ export function useGestureRecognizer(
   useEffect(() => { lstmClassifyRef.current = lstmClassify }, [lstmClassify])
   useEffect(() => { getLandmarkBufferRef.current = getLandmarkBuffer }, [getLandmarkBuffer])
   useEffect(() => { isBufferReadyRef.current = isBufferReady }, [isBufferReady])
-  useEffect(() => { videoElementRef.current = videoElement }, [videoElement])
   useEffect(() => { cnnAvailableRef.current = cnnAvailable }, [cnnAvailable])
   useEffect(() => { lstmAvailableRef.current = lstmAvailable }, [lstmAvailable])
+
+  // Latest CNN inference state (written by the async classify, read by the
+  // synchronous rAF loop)
+  const cnnBusyRef = useRef(false)
+  const cnnLastKickRef = useRef(0)
+  const cnnResultRef = useRef<(CNNPrediction & { at: number }) | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +147,28 @@ export function useGestureRecognizer(
         //
         // Each level only runs when the model is available.
 
+        // Kick off a throttled CNN inference while a hand is in frame. The
+        // result lands in cnnResultRef and is consumed by tier 2 below on a
+        // later frame — the loop itself never awaits.
+        const now = performance.now()
+        if (rawLandmarks && cnnAvailableRef.current && cnnClassifyRef.current) {
+          if (!cnnBusyRef.current && now - cnnLastKickRef.current >= CNN_INTERVAL_MS) {
+            cnnBusyRef.current = true
+            cnnLastKickRef.current = now
+            cnnClassifyRef.current(video, rawLandmarks)
+              .then((result) => {
+                cnnResultRef.current = result
+                  ? { ...result, at: performance.now() }
+                  : null
+              })
+              .catch(() => { cnnResultRef.current = null })
+              .finally(() => { cnnBusyRef.current = false })
+          }
+        } else if (!rawLandmarks) {
+          // Hand left the frame — drop any stale prediction immediately
+          cnnResultRef.current = null
+        }
+
         // 1. LSTM (highest priority — motion overrides static)
         if (
           lstmAvailableRef.current &&
@@ -139,20 +181,29 @@ export function useGestureRecognizer(
             setGestureName(lstmResult.gestureKey)
             setGestureScore(lstmResult.confidence)
             setSource('lstm')
+            logTier('lstm', lstmResult.gestureKey, lstmResult.confidence)
             rafRef.current = requestAnimationFrame(loop)
             return
           }
         }
 
-        // 2. CNN (trained image classifier — async, runs in parallel via separate call)
-        // CNN results are surfaced via the async path in App.tsx (addFrame triggers it).
-        // Here we fall through so the rAF loop stays synchronous.
+        // 2. CNN (trained image classifier — most recent fresh result)
+        const cnnResult = cnnResultRef.current
+        if (rawLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
+          setGestureName(cnnResult.gestureKey)
+          setGestureScore(cnnResult.confidence)
+          setSource('cnn')
+          logTier('cnn', cnnResult.gestureKey, cnnResult.confidence)
+          rafRef.current = requestAnimationFrame(loop)
+          return
+        }
 
         // 3. MediaPipe built-in
         if (mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)) {
           setGestureName(mediapipeGesture)
           setGestureScore(score)
           setSource('mediapipe')
+          logTier('mediapipe', mediapipeGesture, score)
           rafRef.current = requestAnimationFrame(loop)
           return
         }
@@ -163,10 +214,12 @@ export function useGestureRecognizer(
           setGestureName(geometric ?? 'None')
           setGestureScore(geometric ? 0.85 : 0)
           setSource(geometric ? 'geometric' : null)
+          logTier(geometric ? 'geometric' : null, geometric ?? 'None', geometric ? 0.85 : 0)
         } else {
           setGestureName('None')
           setGestureScore(0)
           setSource(null)
+          logTier(null, 'None', 0)
         }
       }
       rafRef.current = requestAnimationFrame(loop)

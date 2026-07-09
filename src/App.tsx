@@ -54,7 +54,7 @@ function App() {
   const lstmClassifier = useLSTMClassifier()
   const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer } = useLandmarkBuffer()
 
-  const { landmarks, gestureName, gestureScore, isLoaded } = useGestureRecognizer(
+  const { landmarks, gestureName, gestureScore, isLoaded, source } = useGestureRecognizer(
     videoRef as React.RefObject<HTMLVideoElement>,
     {
       cnnClassify: cnnClassifier.classify,
@@ -63,7 +63,6 @@ function App() {
       lstmAvailable: lstmClassifier.isAvailable,
       getLandmarkBuffer: getBuffer,
       isBufferReady,
-      videoElement: videoRef.current,
     },
   )
   const { transcript, addPhrase, clearTranscript } = useTranscript()
@@ -466,14 +465,24 @@ function App() {
     spellLocked.current = false
   }
 
-  // Classifier status
+  // Classifier status — shows the tier that is ACTUALLY firing right now,
+  // not just which models loaded. Falls back to the loaded-model summary
+  // when no hand is in frame.
   const classifierStatus =
-    cnnClassifier.isAvailable && lstmClassifier.isAvailable
-      ? { text: 'CNN + LSTM', color: 'var(--primary)' }
-      : cnnClassifier.isAvailable
-      ? { text: 'CNN', color: 'var(--primary)' }
-      : lstmClassifier.isAvailable
+    source === 'lstm'
       ? { text: 'LSTM', color: 'var(--primary)' }
+      : source === 'cnn'
+      ? { text: 'CNN', color: 'var(--primary)' }
+      : source === 'mediapipe'
+      ? { text: 'MediaPipe', color: 'var(--primary)' }
+      : source === 'geometric'
+      ? { text: 'Geometric', color: 'var(--text-3)' }
+      : cnnClassifier.isAvailable && lstmClassifier.isAvailable
+      ? { text: 'CNN + LSTM ready', color: 'var(--text-3)' }
+      : cnnClassifier.isAvailable
+      ? { text: 'CNN ready', color: 'var(--text-3)' }
+      : lstmClassifier.isAvailable
+      ? { text: 'LSTM ready', color: 'var(--text-3)' }
       : { text: 'Geometric', color: 'var(--text-3)' }
 
   // Arc letter (FIX 4B)
