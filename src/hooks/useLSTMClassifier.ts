@@ -5,9 +5,32 @@ import {
   LSTM_LABELS,
   LSTM_CONFIDENCE_THRESHOLD,
   LSTM_SEQUENCE_LENGTH,
+  LSTM_MIN_MOTION,
   LANDMARK_FEATURE_COUNT,
 } from '../utils/modelConfig'
 import type { Landmark } from '../utils/aslClassifier'
+
+/**
+ * Mean frame-to-frame landmark displacement across the buffer, in
+ * normalized coordinates. Static holds measure ~0.005; deliberate
+ * dynamic signs measure >= 0.009 on recorded data.
+ */
+export function sequenceMotion(buffer: Landmark[][]): number {
+  let total = 0
+  let count = 0
+  for (let f = 1; f < buffer.length; f++) {
+    const prev = buffer[f - 1]
+    const curr = buffer[f]
+    for (let i = 0; i < curr.length; i++) {
+      const dx = curr[i].x - prev[i].x
+      const dy = curr[i].y - prev[i].y
+      const dz = curr[i].z - prev[i].z
+      total += Math.sqrt(dx * dx + dy * dy + dz * dz)
+      count++
+    }
+  }
+  return count > 0 ? total / count : 0
+}
 
 export type LSTMPrediction = {
   label: string       // e.g. "hello"
@@ -76,6 +99,12 @@ export function useLSTMClassifier() {
   const classifySequence = useCallback(
     (buffer: Landmark[][]): LSTMPrediction | null => {
       if (!modelRef.current || !isLoaded || buffer.length !== LSTM_SEQUENCE_LENGTH) {
+        return null
+      }
+
+      // Static hold — not a dynamic sign. Skip the LSTM entirely so a
+      // closed-set softmax can't hijack static letters from the CNN.
+      if (sequenceMotion(buffer) < LSTM_MIN_MOTION) {
         return null
       }
 

@@ -26,3 +26,12 @@ LSTM_LABELS to exactly the trained class list the script prints.
 hello, thank_you, please, sorry, help, more,
 finished, want, understand, where, name,
 pain, water, eat, friend
+
+## The 'other' rejection class
+Also record an `other` class: random hand motion, static holds, and
+fingerspelling transitions (30+ sequences, the more varied the better).
+A closed-set softmax must answer *something* for every input — without
+a rejection class, waving your hand randomly will confidently predict
+one of the real signs. The app discards `other` predictions, letting
+the waterfall fall through to the CNN. A motion gate (LSTM_MIN_MOTION)
+additionally skips the LSTM for static holds.

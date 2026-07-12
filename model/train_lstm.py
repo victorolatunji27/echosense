@@ -75,6 +75,11 @@ CANONICAL_LABELS = [
     'hello', 'thank_you', 'please', 'sorry', 'help',
     'more', 'finished', 'want', 'understand', 'where',
     'name', 'pain', 'water', 'eat', 'friend',
+    # Rejection class — record random hand motion, static holds, and
+    # fingerspelling transitions. The app discards 'other' predictions,
+    # which stops the closed-set softmax from firing a sign on
+    # everything else the camera sees.
+    'other',
 ]
 
 print("\n" + "=" * 56)

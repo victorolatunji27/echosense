@@ -6,5 +6,8 @@ matplotlib
 scikit-learn
 tensorflowjs
 kaggle
-# mediapipe's tasks API breaks on protobuf 5+/6+ (MessageFactory errors)
-protobuf>=4.25.3,<5
+# protobuf 6.x works for both the mediapipe Tasks API and tensorflowjs
+# (tensorflowjs' yggdrasil protos are gencoded with protoc 6 and reject
+# older runtimes; mediapipe's legacy solutions API is the only thing
+# that needed <5, and collect_gestures.py no longer uses it)
+protobuf>=6.31,<7

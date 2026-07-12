@@ -16,11 +16,15 @@ export const CNN_LABELS: string[] = [
 ]
 
 // Dynamic gesture labels in training order.
-// Must match LSTM training label order exactly.
+// Must match CANONICAL_LABELS in model/train_lstm.py exactly.
+// 'other' is a rejection class (random motion / static holds / letter
+// transitions) — it has no LSTM_DISPLAY_MAP entry, so predictions of it
+// are discarded and the waterfall falls through to the CNN.
 export const LSTM_LABELS: string[] = [
   'hello', 'thank_you', 'please', 'sorry', 'help',
   'more', 'finished', 'want', 'understand', 'where',
   'name', 'pain', 'water', 'eat', 'friend',
+  'other',
 ]
 
 // Minimum confidence to accept a CNN prediction.
@@ -29,6 +33,12 @@ export const CNN_CONFIDENCE_THRESHOLD = 0.75
 
 // Minimum confidence for LSTM gesture acceptance.
 export const LSTM_CONFIDENCE_THRESHOLD = 0.82
+
+// Minimum mean frame-to-frame landmark displacement (normalized coords)
+// for a buffer to count as a dynamic sign. Static holds measure ~0.005;
+// every recorded dynamic sign measures >= 0.009. Below this the LSTM is
+// skipped so it can't hijack static signs from the CNN.
+export const LSTM_MIN_MOTION = 0.007
 
 // Number of landmark frames the LSTM expects.
 // Must match sequence length used in training.

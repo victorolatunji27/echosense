@@ -140,6 +140,13 @@ def collect(label: str, n_sequences: int, n_frames: int):
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[ERROR] Cannot open webcam.")
+        if sys.platform == 'darwin':
+            print(
+                "\nOn macOS this is almost always a Camera permission issue:\n"
+                "  System Settings → Privacy & Security → Camera → enable the\n"
+                "  app you're running this from (Terminal / VS Code), then\n"
+                "  QUIT and REOPEN that app and rerun this script.\n"
+            )
         sys.exit(1)
 
     timestamp_ms = 0  # must increase monotonically for RunningMode.VIDEO
