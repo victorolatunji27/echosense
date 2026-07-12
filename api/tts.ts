@@ -1,6 +1,18 @@
-// NOTE: helpers are inlined (not shared via ./_utils) because Vercel's
-// Node ESM runtime fails extensionless relative imports at cold start
-// (ERR_MODULE_NOT_FOUND). Keep these functions self-contained.
+// Vercel invokes these functions with the legacy Node (req, res)
+// signature (IncomingMessage / ServerResponse + helpers), NOT web
+// Request/Response — verified from production runtime logs. Minimal
+// structural types below avoid a dependency on @vercel/node.
+interface VercelRequest {
+  method?: string
+  headers: Record<string, string | string[] | undefined>
+  body?: unknown
+}
+interface VercelResponse {
+  status(code: number): VercelResponse
+  json(obj: unknown): void
+  setHeader(name: string, value: string): void
+  send(data: unknown): void
+}
 
 const MAX_BODY_BYTES = 8 * 1024
 const MAX_TEXT_LENGTH = 1000
@@ -10,19 +22,18 @@ const RATE_WINDOW_MS = 60_000
 
 const buckets = new Map<string, { count: number; resetAt: number }>()
 
-function jsonError(status: number, message: string): Response {
-  return Response.json({ error: message }, { status })
-}
-
 /**
  * Best-effort per-IP fixed-window rate limit. State lives in the module
  * scope of a serverless instance, so the effective ceiling is
  * (limit × warm instances) — enough to stop casual abuse of the proxied
  * keys without an external store.
  */
-function checkRateLimit(req: Request): Response | null {
+function isRateLimited(req: VercelRequest): boolean {
+  const forwarded = req.headers['x-forwarded-for']
   const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+    (Array.isArray(forwarded) ? forwarded[0] : forwarded)
+      ?.split(',')[0]
+      ?.trim() || 'unknown'
   const now = Date.now()
 
   if (buckets.size > 10_000) {
@@ -34,65 +45,53 @@ function checkRateLimit(req: Request): Response | null {
   const bucket = buckets.get(ip)
   if (!bucket || now >= bucket.resetAt) {
     buckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS })
-    return null
+    return false
   }
-  if (bucket.count >= RATE_LIMIT) {
-    return jsonError(429, 'Too many requests — please slow down.')
-  }
+  if (bucket.count >= RATE_LIMIT) return true
   bucket.count += 1
-  return null
+  return false
 }
 
-async function readJsonBody(
-  req: Request,
-): Promise<{ body?: unknown; error?: Response }> {
-  const declared = Number(req.headers.get('content-length') ?? '0')
-  if (declared > MAX_BODY_BYTES) {
-    return { error: jsonError(413, 'Request body too large.') }
-  }
-
-  const text = await req.text()
-  if (text.length > MAX_BODY_BYTES) {
-    return { error: jsonError(413, 'Request body too large.') }
-  }
-
-  try {
-    return { body: JSON.parse(text) }
-  } catch {
-    return { error: jsonError(400, 'Invalid JSON body.') }
-  }
-}
-
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
-    return jsonError(405, 'Method not allowed.')
+    res.status(405).json({ error: 'Method not allowed.' })
+    return
   }
-
-  const limited = checkRateLimit(req)
-  if (limited) return limited
+  if (isRateLimited(req)) {
+    res.status(429).json({ error: 'Too many requests — please slow down.' })
+    return
+  }
 
   const apiKey = process.env.ELEVENLABS_KEY
   if (!apiKey) {
-    return jsonError(500, 'ELEVENLABS_KEY is not configured on the server.')
+    res.status(500).json({ error: 'ELEVENLABS_KEY is not configured on the server.' })
+    return
   }
 
-  const { body, error } = await readJsonBody(req)
-  if (error) return error
+  if (Number(req.headers['content-length'] ?? '0') > MAX_BODY_BYTES) {
+    res.status(413).json({ error: 'Request body too large.' })
+    return
+  }
 
-  const { text, voiceId } = (body ?? {}) as { text?: unknown; voiceId?: unknown }
+  // Vercel pre-parses JSON bodies into req.body
+  const { text, voiceId } = ((typeof req.body === 'object' && req.body) || {}) as {
+    text?: unknown
+    voiceId?: unknown
+  }
 
   if (
     typeof text !== 'string' ||
     text.trim().length === 0 ||
     text.length > MAX_TEXT_LENGTH
   ) {
-    return jsonError(
-      400,
-      `text must be a non-empty string of at most ${MAX_TEXT_LENGTH} characters.`,
-    )
+    res.status(400).json({
+      error: `text must be a non-empty string of at most ${MAX_TEXT_LENGTH} characters.`,
+    })
+    return
   }
   if (typeof voiceId !== 'string' || !VOICE_ID_RE.test(voiceId)) {
-    return jsonError(400, 'Invalid voiceId.')
+    res.status(400).json({ error: 'Invalid voiceId.' })
+    return
   }
 
   const upstream = await fetch(
@@ -112,15 +111,15 @@ export default async function handler(req: Request): Promise<Response> {
     },
   )
 
-  if (!upstream.ok || !upstream.body) {
-    return jsonError(502, 'Upstream TTS request failed.')
+  if (!upstream.ok) {
+    res.status(502).json({ error: 'Upstream TTS request failed.' })
+    return
   }
 
-  return new Response(upstream.body, {
-    status: 200,
-    headers: {
-      'Content-Type': 'audio/mpeg',
-      'Cache-Control': 'no-store',
-    },
-  })
+  // TTS clips are short (<= 1000 chars of text) — buffering the audio is
+  // simpler than streaming, and the client reads the full body anyway.
+  const audio = Buffer.from(await upstream.arrayBuffer())
+  res.setHeader('Content-Type', 'audio/mpeg')
+  res.setHeader('Cache-Control', 'no-store')
+  res.status(200).send(audio)
 }
