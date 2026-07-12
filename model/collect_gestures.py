@@ -35,29 +35,72 @@ import argparse
 import os
 import sys
 import time
+import urllib.request
 
 import cv2
 import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 SEQ_DIR       = os.path.join(os.path.dirname(__file__), 'data', 'sequences')
 COUNTDOWN_SEC = 2      # pause between sequences
 FONT          = cv2.FONT_HERSHEY_SIMPLEX
 
-# MediaPipe
-mp_hands    = mp.solutions.hands
-mp_drawing  = mp.solutions.drawing_utils
-mp_styles   = mp.solutions.drawing_styles
+# MediaPipe Tasks HandLandmarker — the same landmark family the web app
+# uses (@mediapipe/tasks-vision). The legacy mp.solutions API no longer
+# ships in current mediapipe wheels.
+LANDMARKER_MODEL = os.path.join(os.path.dirname(__file__), 'hand_landmarker.task')
+LANDMARKER_URL   = (
+    'https://storage.googleapis.com/mediapipe-models/hand_landmarker/'
+    'hand_landmarker/float16/1/hand_landmarker.task'
+)
+
+# 21-landmark skeleton, same connection list the app draws
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (5, 9), (9, 10), (10, 11), (11, 12),
+    (9, 13), (13, 14), (14, 15), (15, 16),
+    (13, 17), (17, 18), (18, 19), (19, 20),
+    (0, 17),
+]
+
+
+def make_landmarker() -> mp_vision.HandLandmarker:
+    if not os.path.exists(LANDMARKER_MODEL):
+        print(f"Downloading hand_landmarker.task → {LANDMARKER_MODEL} ...")
+        urllib.request.urlretrieve(LANDMARKER_URL, LANDMARKER_MODEL)
+    options = mp_vision.HandLandmarkerOptions(
+        base_options=mp_python.BaseOptions(model_asset_path=LANDMARKER_MODEL),
+        running_mode=mp_vision.RunningMode.VIDEO,
+        num_hands=1,
+        min_hand_detection_confidence=0.6,
+        min_tracking_confidence=0.5,
+    )
+    return mp_vision.HandLandmarker.create_from_options(options)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def extract_landmarks(result) -> np.ndarray | None:
     """Return (63,) float32 array from the first detected hand, or None."""
-    if not result.multi_hand_landmarks:
+    if not result.hand_landmarks:
         return None
-    lm = result.multi_hand_landmarks[0].landmark
+    lm = result.hand_landmarks[0]
     return np.array([[l.x, l.y, l.z] for l in lm], dtype=np.float32).flatten()
+
+
+def draw_landmarks(frame, result):
+    """Draw the 21-point skeleton (replaces mp.solutions.drawing_utils)."""
+    if not result.hand_landmarks:
+        return
+    h, w = frame.shape[:2]
+    pts = [(int(l.x * w), int(l.y * h)) for l in result.hand_landmarks[0]]
+    for a, b in HAND_CONNECTIONS:
+        cv2.line(frame, pts[a], pts[b], (90, 160, 90), 2, cv2.LINE_AA)
+    for p in pts:
+        cv2.circle(frame, p, 4, (110, 169, 200), cv2.FILLED, cv2.LINE_AA)
 
 
 def overlay_text(frame, lines: list[tuple[str, tuple, float, int, tuple]]):
@@ -99,12 +142,9 @@ def collect(label: str, n_sequences: int, n_frames: int):
         print("[ERROR] Cannot open webcam.")
         sys.exit(1)
 
-    with mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=1,
-        min_detection_confidence=0.6,
-        min_tracking_confidence=0.5,
-    ) as hands:
+    timestamp_ms = 0  # must increase monotonically for RunningMode.VIDEO
+
+    with make_landmarker() as landmarker:
 
         for seq_idx in range(start_idx, end_idx):
             # ── Countdown ────────────────────────────────────────────────────
@@ -144,17 +184,11 @@ def collect(label: str, n_sequences: int, n_frames: int):
                     break
                 frame = cv2.flip(frame, 1)
                 rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                result = hands.process(rgb)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                timestamp_ms += 33
+                result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-                # Draw landmarks
-                if result.multi_hand_landmarks:
-                    for hand_lm in result.multi_hand_landmarks:
-                        mp_drawing.draw_landmarks(
-                            frame, hand_lm,
-                            mp_hands.HAND_CONNECTIONS,
-                            mp_styles.get_default_hand_landmarks_style(),
-                            mp_styles.get_default_hand_connections_style(),
-                        )
+                draw_landmarks(frame, result)
 
                 landmarks = extract_landmarks(result)
                 if landmarks is not None:
