@@ -6,10 +6,16 @@ Drop your trained TensorFlow.js model files here:
 
 ## How to train
 1. Record 30 sequences × 30 frames for each gesture
-   using: python scripts/collect_gestures.py [label]
-2. Run: python scripts/train_lstm.py
-3. Export to TensorFlow.js format
-4. Drop files here — LSTM activates automatically
+   using: model/venv/bin/python model/collect_gestures.py [label]
+   (record every label listed below)
+2. Run: model/venv/bin/python model/train_lstm.py
+   — trains, exports to TensorFlow.js, and fixes the model.json
+   topology automatically (scripts/fix_tfjs_model_json.py)
+3. Copy model/saved/tfjs_lstm/* here — LSTM activates automatically
+
+Class order is canonical (LSTM_LABELS in modelConfig.ts), never
+alphabetical. If you train on a subset of gestures, update
+LSTM_LABELS to exactly the trained class list the script prints.
 
 ## Model input
 - Shape: [1, 30, 63]

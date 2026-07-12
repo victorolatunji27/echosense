@@ -43,7 +43,7 @@ from tensorflow.keras.callbacks import (
 from tensorflow.keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
+
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 MODEL_DIR   = os.path.dirname(__file__)
@@ -67,6 +67,16 @@ LR              = 1e-3
 VAL_SPLIT       = 0.2
 RANDOM_SEED     = 42
 
+# Canonical class order — MUST match LSTM_LABELS in src/utils/modelConfig.ts.
+# The app maps model output index i -> LSTM_LABELS[i], so training must use
+# this exact order (NOT alphabetical). If you train on a subset, update
+# LSTM_LABELS in modelConfig.ts to the class list this script prints.
+CANONICAL_LABELS = [
+    'hello', 'thank_you', 'please', 'sorry', 'help',
+    'more', 'finished', 'want', 'understand', 'where',
+    'name', 'pain', 'water', 'eat', 'friend',
+]
+
 print("\n" + "=" * 56)
 print("  EchoSense — train_lstm.py")
 print("=" * 56)
@@ -83,16 +93,34 @@ if not os.path.isdir(SEQ_DIR):
     print("  ...\n")
     sys.exit(1)
 
-labels_found = sorted([
+dirs_found = {
     d for d in os.listdir(SEQ_DIR)
     if os.path.isdir(os.path.join(SEQ_DIR, d))
-])
+}
+
+unknown = dirs_found - set(CANONICAL_LABELS)
+if unknown:
+    print(f"\n[ERROR] Sequence folder(s) not in CANONICAL_LABELS: {sorted(unknown)}")
+    print("Rename them to match LSTM_LABELS in src/utils/modelConfig.ts, or add")
+    print("them to CANONICAL_LABELS here AND to LSTM_LABELS in modelConfig.ts.")
+    sys.exit(1)
+
+# Order classes canonically (modelConfig.ts order), never alphabetically —
+# the app maps output index i -> LSTM_LABELS[i].
+labels_found = [l for l in CANONICAL_LABELS if l in dirs_found]
 
 if len(labels_found) < 2:
     print(f"\n[ERROR] Need at least 2 gesture classes. Found: {labels_found}")
     sys.exit(1)
 
 print(f"      Classes found : {labels_found}")
+
+missing = [l for l in CANONICAL_LABELS if l not in dirs_found]
+if missing:
+    print(f"\n      [WARN] Training on a SUBSET — no data for: {missing}")
+    print("      The app's LSTM_LABELS in src/utils/modelConfig.ts must be")
+    print("      updated to exactly this trained class list (in this order):")
+    print(f"      {labels_found}\n")
 
 sequences, raw_labels = [], []
 
@@ -117,20 +145,21 @@ if len(sequences) == 0:
     print("\n[ERROR] No valid sequences found. Check your data.\n")
     sys.exit(1)
 
-# Encode labels
-le = LabelEncoder()
-le.fit(labels_found)
-y_encoded  = le.transform(raw_labels)
-n_classes  = len(le.classes_)
+# Encode labels in canonical order (LabelEncoder would sort alphabetically
+# and mislabel every prediction in the app)
+label_to_idx = {label: idx for idx, label in enumerate(labels_found)}
+class_names  = labels_found
+y_encoded  = np.array([label_to_idx[l] for l in raw_labels])
+n_classes  = len(class_names)
 y_onehot   = to_categorical(y_encoded, num_classes=n_classes)
 X          = np.array(sequences, dtype=np.float32)
 
 print(f"      X shape : {X.shape}")
 print(f"      y shape : {y_onehot.shape}")
-print(f"      Classes : {list(le.classes_)}")
+print(f"      Classes : {class_names}")
 
 # Save class index map
-class_indices = {label: int(idx) for idx, label in enumerate(le.classes_)}
+class_indices = {label: int(idx) for idx, label in enumerate(class_names)}
 with open(INDEX_JSON, 'w') as f:
     json.dump(class_indices, f, indent=2)
 print(f"      Class indices saved → {INDEX_JSON}")
@@ -233,16 +262,16 @@ print(f"\n      Val accuracy : {val_acc:.4f}")
 print(f"      Val loss     : {val_loss:.4f}")
 
 print("\n      Classification Report:")
-print(classification_report(y_true, y_pred, target_names=le.classes_))
+print(classification_report(y_true, y_pred, target_names=class_names))
 
 # Confusion matrix
 cm = confusion_matrix(y_true, y_pred)
 print("      Confusion Matrix (rows=true, cols=pred):")
-header = "  ".join(f"{c[:6]:>6}" for c in le.classes_)
+header = "  ".join(f"{c[:6]:>6}" for c in class_names)
 print(f"             {header}")
 for i, row in enumerate(cm):
     row_str = "  ".join(f"{v:>6}" for v in row)
-    print(f"  {le.classes_[i]:<12} {row_str}")
+    print(f"  {class_names[i]:<12} {row_str}")
 
 
 # ── 5b. Training curves ───────────────────────────────────────────────────────
@@ -287,7 +316,7 @@ best_acc   = max(history.history['val_accuracy'])
 print("\n" + "=" * 56)
 print("  Training Complete")
 print("=" * 56)
-print(f"  Classes            : {list(le.classes_)}")
+print(f"  Classes            : {class_names}")
 print(f"  Best epoch         : {best_epoch}")
 print(f"  Best val_accuracy  : {best_acc:.4f}")
 print(f"  Final val_accuracy : {val_acc_[-1]:.4f}")
@@ -302,15 +331,25 @@ print(f"\n[6/6] Exporting to TF.js → {TFJS_DIR} ...")
 try:
     import tensorflowjs as tfjs
     tfjs.converters.save_keras_model(model, TFJS_DIR)
+
+    # Keras 3 writes a topology format the tfjs browser runtime cannot
+    # parse — rewrite model.json to legacy Keras 2 format in place.
+    fixer = os.path.join(MODEL_DIR, '..', 'scripts', 'fix_tfjs_model_json.py')
+    subprocess.run(
+        [sys.executable, fixer, os.path.join(TFJS_DIR, 'model.json')],
+        check=True,
+    )
+
     tfjs_files = os.listdir(TFJS_DIR)
     print(f"\n  [OK] TF.js export successful. Files:")
     for fname in sorted(tfjs_files):
         size = os.path.getsize(os.path.join(TFJS_DIR, fname))
         print(f"       {fname:<40} {size / 1024:.1f} KB")
     print(f"\n  Next step:")
-    print(f"    cp {TFJS_DIR}/* echosense/public/models/lstm/")
-    print(f"    cp {INDEX_JSON} echosense/public/models/lstm/\n")
+    print(f"    cp {TFJS_DIR}/* public/models/lstm/")
+    print(f"    (then hard-refresh the app — the LSTM activates automatically)\n")
 except Exception as e:
     print(f"\n  [ERROR] TF.js export failed: {e}")
     print(f"\n  Run manually:")
-    print(f"  tensorflowjs_converter --input_format=keras {BEST_H5} {TFJS_DIR}\n")
+    print(f"  tensorflowjs_converter --input_format=keras {BEST_H5} {TFJS_DIR}")
+    print(f"  python3 scripts/fix_tfjs_model_json.py {TFJS_DIR}/model.json\n")
