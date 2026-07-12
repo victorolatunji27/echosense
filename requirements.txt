@@ -6,3 +6,5 @@ matplotlib
 scikit-learn
 tensorflowjs
 kaggle
+# mediapipe's tasks API breaks on protobuf 5+/6+ (MessageFactory errors)
+protobuf>=4.25.3,<5
