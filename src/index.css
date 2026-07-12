@@ -123,22 +123,6 @@ canvas { display: block; }
   animation: fadeUp 0.15s ease-out;
 }
 
-/* ── Gesture flash ──────────────────────────────────────────────────── */
-.gesture-flash {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 999;
-  background: var(--primary);
-  padding: 14px 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  animation: slideDown 0.18s ease-out;
-}
-
 /* ── Custom cursor ──────────────────────────────────────────────────── */
 .cursor-dot {
   position: fixed;
@@ -178,11 +162,6 @@ canvas { display: block; }
 @keyframes scaleIn {
   from { transform: scale(0.7); opacity: 0; }
   to   { transform: scale(1);   opacity: 1; }
-}
-
-@keyframes slideDown {
-  from { transform: translateY(-100%); opacity: 0; }
-  to   { transform: translateY(0);     opacity: 1; }
 }
 
 @keyframes blink {

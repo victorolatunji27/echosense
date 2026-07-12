@@ -12,7 +12,6 @@ import { autocorrectWord } from './utils/spellCorrector'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
 import { SentencePanel } from './components/SentencePanel'
-import { GestureFlash } from './components/GestureFlash'
 import { PracticeMode } from './components/PracticeMode'
 import { ReferenceSheet } from './components/ReferenceSheet'
 import { LoaderScreen } from './components/LoaderScreen'
@@ -77,7 +76,6 @@ function App() {
   const sentenceBuilder = useSentenceBuilder(getAccessToken)
 
   const [copied, setCopied] = useState(false)
-  const [flashText, setFlashText] = useState<string | null>(null)
   const [sharedTranscriptLoaded, setSharedTranscriptLoaded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [signCount, setSignCount] = useState(0)
@@ -348,19 +346,12 @@ function App() {
           speak(phraseText, selectedVoiceId)
           lastSpokenPhrase.current = phraseText
         }
-        setFlashText(phraseText)
         setSignCount((c) => c + 1)
         lastCommittedRef.current = phraseText
         holdCountRef.current = 0
       }
     }
   }, [gestureName, landmarks])
-
-  useEffect(() => {
-    if (flashText === null) return
-    const id = setTimeout(() => setFlashText(null), 1500)
-    return () => clearTimeout(id)
-  }, [flashText])
 
   function changeMode(m: 'phrase' | 'spell' | 'sentence') {
     modeRef.current = m
@@ -515,7 +506,6 @@ function App() {
       >
       <CustomCursor />
       <LoaderScreen isLoaded={isLoaded} />
-      <GestureFlash text={flashText} gestureKey={gestureName} />
 
       {showReference && (
         <ReferenceSheet onClose={() => setShowReference(false)} currentGesture={gestureName} />
