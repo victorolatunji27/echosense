@@ -46,6 +46,8 @@ const WORD_MAP: Record<string, string> = {
   'ASL_MONEY':      'MONEY',
   'ASL_TIME':       'TIME',
   'ASL_THANK':      'THANK',
+  'ASL_YOU':        'YOU',
+  'ASL_GO':         'GO',
 }
 
 // Gestures that act as word boundaries — they break letter grouping

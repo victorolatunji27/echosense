@@ -6,21 +6,28 @@ Opens the webcam, runs MediaPipe HandLandmarker (2 hands) and FaceLandmarker
 sequences for a single gesture label.
 
 Usage:
-    python model/collect_gestures.py <label> [--sequences N] [--frames F]
+    python model/collect_gestures.py <label> [marker] [--sequences N] [--frames F]
 
 Examples:
     python model/collect_gestures.py hello
     python model/collect_gestures.py thank_you --sequences 40
-    python model/collect_gestures.py please --sequences 30 --frames 30
+    python model/collect_gestures.py you statement          # neutral face
+    python model/collect_gestures.py you yesno_question     # brow raise
+    python model/collect_gestures.py you wh_question        # brow furrow
+    python model/collect_gestures.py you negation           # headshake
 
 Arguments:
     label          Name of the gesture (used as the folder name)
+    marker         Non-manual marker (facial grammar), one of:
+                   statement (default) / yesno_question / wh_question / negation
+                   To capture expression-differentiated pairs, record the SAME
+                   manual sign under different markers.
     --sequences    How many sequences to record  (default: 30)
     --frames       Frames per sequence           (default: 30)
 
 Output:
-    model/data/sequences/<label>/0.npy
-    model/data/sequences/<label>/1.npy
+    model/data/sequences/<label>/0.npy              (marker = statement)
+    model/data/sequences/<label>/<marker>/0.npy     (non-statement markers)
     ...
 
 Each .npy file is a float32 array of shape (frames, 138):
@@ -92,6 +99,12 @@ FACE_BLENDSHAPE_KEYS = [
 FACE_FEATURE_COUNT = len(FACE_BLENDSHAPE_KEYS)  # 12
 
 FRAME_FEATURE_COUNT = HAND_FEATURE_COUNT * 2 + FACE_FEATURE_COUNT  # 138
+
+# Non-manual markers — MUST match NMM_LABELS in src/utils/modelConfig.ts and
+# CANONICAL_MARKERS in model/train_multimodal.py. 'statement' is the neutral
+# default and is stored as flat files in the sign folder; other markers go in
+# a <sign>/<marker>/ subfolder.
+MARKERS = ['statement', 'yesno_question', 'wh_question', 'negation']
 
 # 21-landmark skeleton, same connection list the app draws
 HAND_CONNECTIONS = [
@@ -248,8 +261,11 @@ def warn_if_legacy_format(out_dir: str, label: str):
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def collect(label: str, n_sequences: int, n_frames: int):
-    out_dir = os.path.join(SEQ_DIR, label)
+def collect(label: str, marker: str, n_sequences: int, n_frames: int):
+    # 'statement' → flat sign folder (backward compatible); other markers →
+    # <sign>/<marker>/ subfolder. train_multimodal.py reads both layouts.
+    out_dir = os.path.join(SEQ_DIR, label) if marker == 'statement' \
+        else os.path.join(SEQ_DIR, label, marker)
     os.makedirs(out_dir, exist_ok=True)
 
     warn_if_legacy_format(out_dir, label)
@@ -267,11 +283,14 @@ def collect(label: str, n_sequences: int, n_frames: int):
     print(f"  EchoSense — collect_gestures.py")
     print(f"{'=' * 52}")
     print(f"  Label      : {label}")
+    print(f"  Marker     : {marker}")
     print(f"  Sequences  : {n_sequences}  (#{start_idx} → #{end_idx - 1})")
     print(f"  Frames/seq : {n_frames}")
     print(f"  Features   : {FRAME_FEATURE_COUNT} (2 hands × 63 + {FACE_FEATURE_COUNT} face)")
     print(f"  Output dir : {out_dir}")
     print(f"{'=' * 52}")
+    if marker != 'statement':
+        print(f"  Hold the '{marker}' facial expression THROUGHOUT each take.")
     print("\nControls:  SPACE = skip countdown   Q/ESC = quit\n")
 
     cap = cv2.VideoCapture(0)
@@ -390,6 +409,8 @@ if __name__ == '__main__':
     )
     parser.add_argument('label',
                         help="Gesture name, e.g. 'hello', 'thank_you'")
+    parser.add_argument('marker', nargs='?', default='statement', choices=MARKERS,
+                        help="Non-manual marker (facial grammar). Default: statement")
     parser.add_argument('--sequences', type=int, default=30,
                         help="Number of sequences to record (default: 30)")
     parser.add_argument('--frames', type=int, default=30,
@@ -398,6 +419,7 @@ if __name__ == '__main__':
 
     collect(
         label=args.label,
+        marker=args.marker,
         n_sequences=args.sequences,
         n_frames=args.frames,
     )

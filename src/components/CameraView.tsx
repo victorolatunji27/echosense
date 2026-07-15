@@ -45,6 +45,7 @@ interface Props {
   // Dev-only capture visualization — see DevCaptureOverlay.
   twoHandLandmarks?: TwoHandSlots
   faceFeatures?: number[] | null
+  nonManualMarker?: string | null
 }
 
 export function CameraView({
@@ -57,6 +58,7 @@ export function CameraView({
   onReady,
   twoHandLandmarks,
   faceFeatures,
+  nonManualMarker,
 }: Props) {
   const { videoRef, isReady, error, retry } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -188,6 +190,7 @@ export function CameraView({
               right={twoHandLandmarks.right}
               left={twoHandLandmarks.left}
               faceFeatures={faceFeatures ?? null}
+              nonManualMarker={nonManualMarker}
             />
           )}
 

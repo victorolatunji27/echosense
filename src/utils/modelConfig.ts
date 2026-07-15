@@ -83,3 +83,42 @@ export const FRAME_FEATURE_COUNT = TWO_HAND_FEATURE_COUNT + FACE_FEATURE_COUNT /
 // existing single-hand CNN/LSTM/geometric classifiers are unaffected
 // either way — they only ever read the primary hand.
 export const ENABLE_WIDE_CAPTURE = true
+
+// ── Multimodal (two-hand + face) sequence model ─────────────────────────
+//
+// Dual-head sequence model over the FRAME_FEATURE_COUNT (138) vector: one
+// head classifies the manual sign, a second classifies the non-manual
+// marker (facial grammar) so the SAME manual sign resolves to different
+// meanings — "you go" vs "you go?" (brow raise) vs "you not go" (negation).
+//
+// Nothing is shipped in public/models/multimodal/ yet. The inference hook
+// HEAD-checks the path and stays dormant until a trained model is present,
+// exactly like the CNN/LSTM hooks. Until then, capture is wired (Prompt 6A)
+// but the interpreter behavior is unchanged.
+export const MULTIMODAL_MODEL_PATH = '/models/multimodal/model.json'
+
+// Manual sign labels — MUST match SIGN_LABELS printed by
+// model/train_multimodal.py at train time (canonical order, never
+// alphabetical). Update this list to exactly the trained set. 'other' is a
+// rejection class (random motion / static holds / non-signs) with no
+// display mapping, so its predictions are discarded.
+export const MULTIMODAL_SIGN_LABELS: string[] = [
+  'hello', 'thank_you', 'please', 'sorry', 'help',
+  'more', 'finished', 'want', 'understand', 'where',
+  'name', 'pain', 'water', 'eat', 'friend',
+  'you', 'go', 'other',
+]
+
+// Non-manual marker labels (facial grammar) — MUST match MARKER_LABELS in
+// model/train_multimodal.py. 'statement' is the neutral/default marker.
+export const NMM_LABELS = ['statement', 'yesno_question', 'wh_question', 'negation'] as const
+export type NonManualMarker = (typeof NMM_LABELS)[number]
+
+// Minimum confidence for the manual-sign head.
+export const MULTIMODAL_SIGN_THRESHOLD = 0.82
+
+// Minimum confidence for the non-manual-marker head to OVERRIDE the neutral
+// 'statement' default. Below this we keep 'statement' rather than trust a
+// shaky facial read, since a wrong question/negation flips the sentence
+// meaning.
+export const MULTIMODAL_MARKER_THRESHOLD = 0.6

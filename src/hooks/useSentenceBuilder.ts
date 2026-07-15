@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { lexSigns } from '../utils/signLexer'
 import { parseSigns } from '../utils/signParser'
+import type { NonManualMarker } from '../utils/modelConfig'
 import {
   evaluateToSentence,
   getTerpAISuggestions,
@@ -19,6 +20,11 @@ export function formatStopwatch(s: number): string {
 
 export function useSentenceBuilder(getAccessToken?: () => Promise<string | undefined>) {
   const signBuffer = useRef<string[]>([])
+  // Latches the last non-statement non-manual marker seen during the
+  // current utterance. In ASL the facial marker is a prosodic overlay
+  // spanning the clause, so one marker applies to the whole buffered
+  // utterance rather than a single sign.
+  const utteranceMarker = useRef<NonManualMarker | null>(null)
   const lastSignTime = useRef<number>(0)
   const autoCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handDropTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -115,6 +121,7 @@ export function useSentenceBuilder(getAccessToken?: () => Promise<string | undef
       setCurrentSentence(pending)
       setSentenceHistory((prev) => [...prev, pending])
       signBuffer.current = []
+      utteranceMarker.current = null
       setBufferDisplay([])
       // Stop the stopwatch — keep sessionSeconds visible
       stopStopwatch()
@@ -153,7 +160,7 @@ export function useSentenceBuilder(getAccessToken?: () => Promise<string | undef
       // TerpAI needs the original gestureKeys for its conversation context.
       prepareRawTokens.current = [...signBuffer.current]
 
-      const parsed = parseSigns(tokens)
+      const parsed = parseSigns(tokens, utteranceMarker.current)
 
       // Auth0 — grab an access token if the user is logged in
       let token: string | undefined
@@ -178,8 +185,12 @@ export function useSentenceBuilder(getAccessToken?: () => Promise<string | undef
   const buildSentence = prepareSentence
 
   const addSign = useCallback(
-    (gestureKey: string) => {
+    (gestureKey: string, marker: NonManualMarker | null = null) => {
       signBuffer.current.push(gestureKey)
+      // Latch a non-statement facial marker for the whole utterance.
+      if (marker && marker !== 'statement') {
+        utteranceMarker.current = marker
+      }
       lastSignTime.current = Date.now()
 
       // ── Stopwatch START on first sign of session ──────────────────
@@ -239,6 +250,7 @@ export function useSentenceBuilder(getAccessToken?: () => Promise<string | undef
     if (handDropTimer.current !== null) clearTimeout(handDropTimer.current)
     if (releaseTimer.current !== null) clearTimeout(releaseTimer.current)
     signBuffer.current = []
+    utteranceMarker.current = null
     conversationHistory.current = []
     prepareRawTokens.current = []
     setBufferDisplay([])

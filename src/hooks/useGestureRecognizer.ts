@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { GestureRecognizer, FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import { classifyASLGesture, type Landmark } from '../utils/aslClassifier'
 import { orderHandsByHandedness, extractFaceFeatures, type TwoHandSlots } from '../utils/frameFeatures'
-import { ENABLE_WIDE_CAPTURE } from '../utils/modelConfig'
+import { ENABLE_WIDE_CAPTURE, type NonManualMarker } from '../utils/modelConfig'
 import type { CNNPrediction } from './useCNNClassifier'
 import type { LSTMPrediction } from './useLSTMClassifier'
+import type { MultimodalPrediction } from './useMultimodalClassifier'
 
 const FACE_LANDMARKER_MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
@@ -16,7 +17,7 @@ const MEDIAPIPE_BUILTINS = new Set([
   'Victory', 'ILoveYou', 'Pointing_Up',
 ])
 
-export type GestureSource = 'lstm' | 'cnn' | 'mediapipe' | 'geometric' | null
+export type GestureSource = 'multimodal' | 'lstm' | 'cnn' | 'mediapipe' | 'geometric' | null
 
 // CNN cadence: the rAF loop is synchronous but classify() is async, so we
 // kick off an inference at most every CNN_INTERVAL_MS and consume the most
@@ -87,7 +88,15 @@ interface GestureRecognizerOptions {
   // Optional CNN classifier — used when model files are present
   cnnClassify?: (video: HTMLVideoElement, landmarks: Landmark[]) => Promise<CNNPrediction | null>
   cnnAvailable?: boolean
-  // Optional LSTM classifier — highest priority when buffer is full
+  // Optional multimodal (two-hand + face) classifier — top dynamic tier
+  // when present. Consumes the wide (138) buffer and also yields the
+  // non-manual (facial grammar) marker.
+  multimodalClassify?: (wideBuffer: number[][]) => MultimodalPrediction | null
+  multimodalAvailable?: boolean
+  getWideBuffer?: () => number[][]
+  isWideReady?: () => boolean
+  // Optional LSTM classifier — legacy single-hand dynamic tier, used when
+  // the multimodal model isn't present.
   lstmClassify?: (buffer: Landmark[][]) => LSTMPrediction | null
   lstmAvailable?: boolean
   // Landmark buffer for LSTM
@@ -131,6 +140,10 @@ interface GestureResult {
   // Compact non-manual (face) feature vector, or null when face tracking
   // is disabled or no face is detected. Same caveat as twoHandLandmarks.
   faceFeatures: number[] | null
+  // Non-manual grammatical marker from the most recent multimodal
+  // prediction (question form / negation), or null when the multimodal
+  // model isn't active. Consumed by the sentence pipeline.
+  nonManualMarker: NonManualMarker | null
 }
 
 export function useGestureRecognizer(
@@ -140,6 +153,10 @@ export function useGestureRecognizer(
   const {
     cnnClassify,
     cnnAvailable = false,
+    multimodalClassify,
+    multimodalAvailable = false,
+    getWideBuffer,
+    isWideReady,
     lstmClassify,
     lstmAvailable = false,
     getLandmarkBuffer,
@@ -158,6 +175,7 @@ export function useGestureRecognizer(
   const [isUnsure, setIsUnsure] = useState(false)
   const [twoHandLandmarks, setTwoHandLandmarks] = useState<TwoHandSlots>(EMPTY_HAND_SLOTS)
   const [faceFeatures, setFaceFeatures] = useState<number[] | null>(null)
+  const [nonManualMarker, setNonManualMarker] = useState<NonManualMarker | null>(null)
 
   // Keep latest option refs so the rAF loop always reads current values
   const cnnClassifyRef = useRef(cnnClassify)
@@ -167,6 +185,10 @@ export function useGestureRecognizer(
   const cnnAvailableRef = useRef(cnnAvailable)
   const lstmAvailableRef = useRef(lstmAvailable)
   const prioritizeMediaPipeRef = useRef(prioritizeMediaPipe)
+  const multimodalClassifyRef = useRef(multimodalClassify)
+  const multimodalAvailableRef = useRef(multimodalAvailable)
+  const getWideBufferRef = useRef(getWideBuffer)
+  const isWideReadyRef = useRef(isWideReady)
 
   useEffect(() => { cnnClassifyRef.current = cnnClassify }, [cnnClassify])
   useEffect(() => { lstmClassifyRef.current = lstmClassify }, [lstmClassify])
@@ -175,6 +197,10 @@ export function useGestureRecognizer(
   useEffect(() => { cnnAvailableRef.current = cnnAvailable }, [cnnAvailable])
   useEffect(() => { lstmAvailableRef.current = lstmAvailable }, [lstmAvailable])
   useEffect(() => { prioritizeMediaPipeRef.current = prioritizeMediaPipe }, [prioritizeMediaPipe])
+  useEffect(() => { multimodalClassifyRef.current = multimodalClassify }, [multimodalClassify])
+  useEffect(() => { multimodalAvailableRef.current = multimodalAvailable }, [multimodalAvailable])
+  useEffect(() => { getWideBufferRef.current = getWideBuffer }, [getWideBuffer])
+  useEffect(() => { isWideReadyRef.current = isWideReady }, [isWideReady])
 
   // Latest CNN inference state (written by the async classify, read by the
   // synchronous rAF loop)
@@ -278,12 +304,17 @@ export function useGestureRecognizer(
 
         // ── Priority waterfall ────────────────────────────────────────────
         //
-        // 1. LSTM  — motion gestures, requires 30-frame buffer
-        // 2. CNN   — static signs from trained image classifier
+        // 1. Multimodal — two-hand + face dynamic signs (also yields the
+        //    non-manual marker). Top dynamic tier when present.
+        // 1b. LSTM — legacy single-hand dynamic tier (fallback when the
+        //    multimodal model isn't shipped).
+        // 2. CNN   — static one-hand letters from the trained image classifier
         // 3. MediaPipe built-in — 7 reliable gesture classes
         // 4. Geometric — landmark math, always available as fallback
         //
-        // Each level only runs when the model is available.
+        // Each level only runs when the model is available. Dynamic tiers
+        // require a full 30-frame buffer + motion (they gate out static
+        // holds so the CNN keeps owning static letters).
 
         // Kick off a throttled CNN inference while a hand is in frame. The
         // result lands in cnnResultRef and is consumed by tier 2 below on a
@@ -310,7 +341,25 @@ export function useGestureRecognizer(
         // Pick this frame's raw prediction from the highest tier that fires
         let raw: RawPrediction = { name: 'None', score: 0, source: null }
 
+        // 1. Multimodal (two-hand + face) — top dynamic tier when shipped.
+        const multimodalResult =
+          multimodalAvailableRef.current &&
+          multimodalClassifyRef.current &&
+          isWideReadyRef.current?.() &&
+          getWideBufferRef.current
+            ? multimodalClassifyRef.current(getWideBufferRef.current())
+            : null
+
+        // Track the non-manual marker whenever the multimodal model produces
+        // one, so the sentence pipeline can read it at commit time.
+        if (multimodalResult) {
+          setNonManualMarker(multimodalResult.marker)
+        } else if (!multimodalAvailableRef.current) {
+          setNonManualMarker(null)
+        }
+
         const lstmResult =
+          !multimodalResult &&
           lstmAvailableRef.current &&
           lstmClassifyRef.current &&
           isBufferReadyRef.current?.() &&
@@ -321,8 +370,11 @@ export function useGestureRecognizer(
         const mediapipeFires =
           !!mediapipeGesture && mediapipeGesture !== 'None' && MEDIAPIPE_BUILTINS.has(mediapipeGesture)
 
-        if (lstmResult) {
-          // 1. LSTM (highest priority — motion overrides static)
+        if (multimodalResult) {
+          // 1. Multimodal (two-hand + face — motion overrides static)
+          raw = { name: multimodalResult.gestureKey, score: multimodalResult.signConfidence, source: 'multimodal' }
+        } else if (lstmResult) {
+          // 1b. LSTM legacy single-hand dynamic tier
           raw = { name: lstmResult.gestureKey, score: lstmResult.confidence, source: 'lstm' }
         } else if (mediapipeFires && prioritizeMediaPipeRef.current) {
           // 2a. MediaPipe built-in first when the consumer only wants the
@@ -393,5 +445,6 @@ export function useGestureRecognizer(
     isUnsure,
     twoHandLandmarks,
     faceFeatures,
+    nonManualMarker,
   }
 }

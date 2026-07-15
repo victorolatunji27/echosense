@@ -129,8 +129,70 @@ function titleCaseWord(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()
 }
 
+// Token → English word for the marker-aware fallback (pronouns + common
+// verbs that appear in expression-differentiated minimal pairs).
+const PRONOUNS = new Set(['YOU', 'I', 'WE', 'HE', 'SHE', 'THEY', 'IT'])
+const TOKEN_NL: Record<string, string> = {
+  YOU: 'you', I: 'I', WE: 'we', HE: 'he', SHE: 'she', THEY: 'they', IT: 'it',
+  GO: 'go', WANT: 'want', EAT: 'eat', HELP: 'help', UNDERSTAND: 'understand',
+  MORE: 'more', FINISHED: 'finished', WATER: 'water', FRIEND: 'friend',
+  NAME: 'name', PAIN: 'pain', HOME: 'home', WORK: 'work', SCHOOL: 'school',
+}
+
+function tokenNL(t: string): string {
+  return TOKEN_NL[t] ?? t.toLowerCase()
+}
+
+/**
+ * Marker-aware fallback for expression-differentiated utterances (used
+ * when the LLM proxy is unavailable). Turns the same manual tokens into a
+ * statement, yes/no question, wh-question, or negation based on the
+ * non-manual marker, so "YOU GO" resolves to "You go." / "Do you go?" /
+ * "You don't go." even offline. Returns null if it can't build one and the
+ * caller should fall through to the general rules.
+ */
+function buildMarkerFallback(parsed: ParsedPhrase): string | null {
+  const marker = parsed.nonManualMarker
+  if (!marker || marker === 'statement') return null
+  const toks = parsed.aslTokens
+  if (toks.length === 0) return null
+
+  const subjectIsPronoun = PRONOUNS.has(toks[0])
+  const subject = subjectIsPronoun ? tokenNL(toks[0]) : null
+  const rest = subjectIsPronoun ? toks.slice(1) : toks
+  const restNL = rest.map(tokenNL).join(' ').trim()
+
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+  if (marker === 'negation') {
+    if (subject && restNL) {
+      const aux = subject === 'he' || subject === 'she' || subject === 'it' ? "doesn't" : "don't"
+      return cap(`${subject} ${aux} ${restNL}.`)
+    }
+    return `Not ${restNL || toks.map(tokenNL).join(' ')}.`.replace(/\s+/g, ' ')
+  }
+
+  if (marker === 'yesno_question') {
+    if (subject && restNL) {
+      const aux = subject === 'he' || subject === 'she' || subject === 'it' ? 'Does' : 'Do'
+      return `${aux} ${subject} ${restNL}?`
+    }
+    return cap(`${toks.map(tokenNL).join(' ')}?`)
+  }
+
+  // wh_question — prepend a wh-word if the tokens don't already carry one
+  const whInTokens = toks.some((t) => ['WHERE', 'WHAT', 'WHO', 'WHEN', 'HOW', 'NAME'].includes(t))
+  if (!whInTokens) {
+    return cap(`what about ${[subject, restNL].filter(Boolean).join(' ')}?`)
+  }
+  return cap(`${toks.map(tokenNL).join(' ')}?`)
+}
+
 // ── Rule-based fallback ─────────────────────────────────────────────
 function buildFallbackSentence(parsed: ParsedPhrase): string {
+  const markerSentence = buildMarkerFallback(parsed)
+  if (markerSentence) return markerSentence
+
   const { aslTokens, detectedPattern, isQuestion, isNegated } = parsed
 
   if (aslTokens.length === 0) return 'Yes.'
@@ -251,6 +313,16 @@ ${numbered}
 Pattern: ${parsed.detectedPattern}
 Is question: ${parsed.isQuestion}
 Is negated: ${parsed.isNegated}
+Facial grammar (non-manual marker): ${parsed.nonManualMarker ?? 'unknown'}${
+  parsed.questionKind !== 'none' ? ` (${parsed.questionKind}-question)` : ''
+}
+
+## Facial grammar rules (CRITICAL — the same manual signs mean different things)
+- If the marker is "yesno_question", phrase as a yes/no question: "YOU GO" → "Do you go?"
+- If the marker is "wh_question", phrase as a wh-question using the wh-sign present.
+- If the marker is "negation", negate the clause: "YOU GO" → "You don't go."
+- If the marker is "statement" (or unknown), phrase as a plain statement: "YOU GO" → "You go."
+- The facial marker OVERRIDES the manual signs for sentence type. Trust it.
 
 ## Critical rules
 1. ALWAYS output a complete, grammatically correct English sentence. Never output fragments.
@@ -282,12 +354,17 @@ export async function evaluateToSentence(
 ): Promise<string> {
   if (parsed.aslTokens.length === 0) return ''
 
-  // FAST PATH — common cases never hit the LLM
-  const forwardKey = parsed.aslTokens.join(' ')
-  if (FAST_MAP[forwardKey]) return FAST_MAP[forwardKey]
+  // FAST PATH — common cases never hit the LLM. Skipped when a non-manual
+  // marker is present: the fast map is statement-only, and a facial
+  // question/negation must change the sentence type.
+  const hasMarker = !!parsed.nonManualMarker && parsed.nonManualMarker !== 'statement'
+  if (!hasMarker) {
+    const forwardKey = parsed.aslTokens.join(' ')
+    if (FAST_MAP[forwardKey]) return FAST_MAP[forwardKey]
 
-  const reverseKey = [...parsed.aslTokens].reverse().join(' ')
-  if (FAST_MAP[reverseKey]) return FAST_MAP[reverseKey]
+    const reverseKey = [...parsed.aslTokens].reverse().join(' ')
+    if (FAST_MAP[reverseKey]) return FAST_MAP[reverseKey]
+  }
 
   try {
     const text = (await createClaudeMessage(buildPrompt(parsed), 80, accessToken))

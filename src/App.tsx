@@ -5,6 +5,7 @@ import { useTranscript } from './hooks/useTranscript'
 import { useTTS } from './hooks/useTTS'
 import { useCNNClassifier } from './hooks/useCNNClassifier'
 import { useLSTMClassifier } from './hooks/useLSTMClassifier'
+import { useMultimodalClassifier } from './hooks/useMultimodalClassifier'
 import { useLandmarkBuffer } from './hooks/useLandmarkBuffer'
 import { useSentenceBuilder } from './hooks/useSentenceBuilder'
 import { getDisplayText, PHRASE_PRIORITY_MAP, isPhraseGesture } from './utils/gestureMap'
@@ -53,7 +54,11 @@ function App() {
 
   const cnnClassifier = useCNNClassifier()
   const lstmClassifier = useLSTMClassifier()
-  const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer, addWideFrame } = useLandmarkBuffer()
+  const multimodalClassifier = useMultimodalClassifier()
+  const {
+    addFrame, getBuffer, isReady: isBufferReady, clearBuffer,
+    addWideFrame, getWideBuffer, isWideReady,
+  } = useLandmarkBuffer()
 
   // Declared before useGestureRecognizer, which reads them
   const [practiceMode, setPracticeMode] = useState(false)
@@ -68,11 +73,16 @@ function App() {
     isUnsure,
     twoHandLandmarks,
     faceFeatures,
+    nonManualMarker,
   } = useGestureRecognizer(
     videoRef as React.RefObject<HTMLVideoElement>,
     {
       cnnClassify: cnnClassifier.classify,
       cnnAvailable: cnnClassifier.isAvailable,
+      multimodalClassify: multimodalClassifier.classifySequence,
+      multimodalAvailable: multimodalClassifier.isAvailable,
+      getWideBuffer,
+      isWideReady,
       lstmClassify: lstmClassifier.classifySequence,
       lstmAvailable: lstmClassifier.isAvailable,
       getLandmarkBuffer: getBuffer,
@@ -222,6 +232,10 @@ function App() {
   const holdCountRef = useRef(0)
   const lastCommittedRef = useRef('')
   const prevGestureRef = useRef<string | null>(null)
+  // Latest non-manual marker, read at sentence-commit time so the facial
+  // grammar of the just-committed sign reaches the sentence pipeline.
+  const nonManualMarkerRef = useRef(nonManualMarker)
+  useEffect(() => { nonManualMarkerRef.current = nonManualMarker }, [nonManualMarker])
 
   useEffect(() => {
     holdCountRef.current = 0
@@ -341,7 +355,7 @@ function App() {
         holdCountRef.current = 0
         return
       }
-      sentenceBuilder.addSign(gestureName)
+      sentenceBuilder.addSign(gestureName, nonManualMarkerRef.current)
       sentenceBuilder.onHandReturn()
       holdCountRef.current = 0
       lastCommittedRef.current = ''
@@ -483,8 +497,14 @@ function App() {
   // Classifier status — shows the tier that is ACTUALLY firing right now,
   // not just which models loaded. Falls back to the loaded-model summary
   // when no hand is in frame.
+  const dynamicReady = multimodalClassifier.isAvailable || lstmClassifier.isAvailable
   const classifierStatus =
-    source === 'lstm'
+    source === 'multimodal'
+      ? {
+          text: nonManualMarker && nonManualMarker !== 'statement' ? `Multimodal · ${nonManualMarker}` : 'Multimodal',
+          color: 'var(--primary)',
+        }
+      : source === 'lstm'
       ? { text: 'LSTM', color: 'var(--primary)' }
       : source === 'cnn'
       ? { text: 'CNN', color: 'var(--primary)' }
@@ -492,12 +512,12 @@ function App() {
       ? { text: 'MediaPipe', color: 'var(--primary)' }
       : source === 'geometric'
       ? { text: 'Geometric', color: 'var(--text-3)' }
-      : cnnClassifier.isAvailable && lstmClassifier.isAvailable
-      ? { text: 'CNN + LSTM ready', color: 'var(--text-3)' }
+      : cnnClassifier.isAvailable && dynamicReady
+      ? { text: multimodalClassifier.isAvailable ? 'CNN + Multimodal ready' : 'CNN + LSTM ready', color: 'var(--text-3)' }
       : cnnClassifier.isAvailable
       ? { text: 'CNN ready', color: 'var(--text-3)' }
-      : lstmClassifier.isAvailable
-      ? { text: 'LSTM ready', color: 'var(--text-3)' }
+      : dynamicReady
+      ? { text: multimodalClassifier.isAvailable ? 'Multimodal ready' : 'LSTM ready', color: 'var(--text-3)' }
       : { text: 'Geometric', color: 'var(--text-3)' }
 
   // Arc letter (FIX 4B)
@@ -774,6 +794,7 @@ function App() {
             onReady={onReady}
             twoHandLandmarks={twoHandLandmarks}
             faceFeatures={faceFeatures}
+            nonManualMarker={nonManualMarker}
           />
 
           {mode === 'sentence' ? (

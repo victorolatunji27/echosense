@@ -23,9 +23,10 @@ interface Props {
   right: Landmark[] | null
   left: Landmark[] | null
   faceFeatures: number[] | null
+  nonManualMarker?: string | null
 }
 
-export function DevCaptureOverlay({ right, left, faceFeatures }: Props) {
+export function DevCaptureOverlay({ right, left, faceFeatures, nonManualMarker }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -104,6 +105,15 @@ export function DevCaptureOverlay({ right, left, faceFeatures }: Props) {
           <span style={{ color: RIGHT_COLOR }}>●</span> right hand: {right ? 'tracked' : '—'}
           <br />
           <span style={{ color: LEFT_COLOR }}>●</span> left hand: {left ? 'tracked' : '—'}
+          {nonManualMarker != null && (
+            <>
+              <br />
+              <span style={{ opacity: 0.6 }}>marker:</span>{' '}
+              <span style={{ color: nonManualMarker === 'statement' ? '#aaa' : '#C8A96E' }}>
+                {nonManualMarker}
+              </span>
+            </>
+          )}
         </div>
         {faceFeatures ? (
           FACE_BLENDSHAPE_KEYS.map((key, i) => (

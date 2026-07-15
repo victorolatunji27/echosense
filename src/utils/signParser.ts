@@ -1,4 +1,5 @@
 import type { SignToken } from './signLexer'
+import type { NonManualMarker } from './modelConfig'
 
 export type DetectedPattern =
   | 'topic-comment'
@@ -10,6 +11,8 @@ export type DetectedPattern =
   | 'spelling'
   | 'unknown'
 
+export type QuestionKind = 'none' | 'yesno' | 'wh'
+
 export type ParsedPhrase = {
   aslTokens: string[]              // original token order (ASL gloss)
   aslStructure: string             // human-readable gloss with annotation
@@ -20,6 +23,12 @@ export type ParsedPhrase = {
   commentWords: string[]
   detectedPattern: DetectedPattern
   confidence: 'high' | 'medium' | 'low'
+  // Non-manual (facial grammar) marker driving question/negation, from the
+  // multimodal model. 'statement' or null when unavailable. This is what
+  // distinguishes "you go" / "you go?" / "you not go" when the manual signs
+  // are identical.
+  nonManualMarker: NonManualMarker | null
+  questionKind: QuestionKind
 }
 
 const QUESTION_WORDS = new Set(['WHERE', 'WHAT', 'WHO', 'WHEN', 'HOW', 'NAME'])
@@ -39,12 +48,32 @@ function isSingleLetter(v: string): boolean {
   return v.length === 1 && v >= 'A' && v <= 'Z'
 }
 
-export function parseSigns(tokens: SignToken[]): ParsedPhrase {
+export function parseSigns(
+  tokens: SignToken[],
+  nonManualMarker: NonManualMarker | null = null,
+): ParsedPhrase {
   const values = tokens.map((t) => t.value)
 
   // ── Detect properties ─────────────────────────────────────────────
-  const isQuestion = values.some((v) => QUESTION_WORDS.has(v))
-  const isNegated = values.includes('NO') && values.length > 1
+  // The facial (non-manual) marker overrides manual detection: in ASL a
+  // brow raise makes a yes/no question and a headshake makes negation
+  // even when the manual signs are identical to a plain statement.
+  const manualQuestion = values.some((v) => QUESTION_WORDS.has(v))
+  const manualWh = values.some((v) => QUESTION_WORDS.has(v)) // our question words are all wh-words
+  const markerQuestion = nonManualMarker === 'yesno_question' || nonManualMarker === 'wh_question'
+  const markerNegation = nonManualMarker === 'negation'
+
+  const isQuestion = markerQuestion || manualQuestion
+  const isNegated = markerNegation || (values.includes('NO') && values.length > 1)
+
+  const questionKind: QuestionKind =
+    nonManualMarker === 'wh_question' || (manualWh && nonManualMarker !== 'yesno_question')
+      ? (isQuestion ? 'wh' : 'none')
+      : nonManualMarker === 'yesno_question'
+      ? 'yesno'
+      : isQuestion
+      ? 'wh'
+      : 'none'
 
   // Topic-comment: object before verb
   let topicWord: string | null = null
@@ -121,5 +150,7 @@ export function parseSigns(tokens: SignToken[]): ParsedPhrase {
     commentWords,
     detectedPattern,
     confidence,
+    nonManualMarker,
+    questionKind,
   }
 }
