@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCamera, type CameraErrorKind } from '../hooks/useCamera'
+import { DevCaptureOverlay } from './DevCaptureOverlay'
+import type { TwoHandSlots } from '../utils/frameFeatures'
 
 const CAMERA_ERROR_COPY: Record<CameraErrorKind, { title: string; body: string }> = {
   denied: {
@@ -40,9 +42,22 @@ interface Props {
   currentLetter: string
   isLocked?: boolean
   onReady: (video: HTMLVideoElement, canvas: HTMLCanvasElement) => void
+  // Dev-only capture visualization — see DevCaptureOverlay.
+  twoHandLandmarks?: TwoHandSlots
+  faceFeatures?: number[] | null
 }
 
-export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, currentLetter, isLocked, onReady }: Props) {
+export function CameraView({
+  landmarks,
+  gestureName,
+  isLoaded,
+  holdProgress,
+  currentLetter,
+  isLocked,
+  onReady,
+  twoHandLandmarks,
+  faceFeatures,
+}: Props) {
   const { videoRef, isReady, error, retry } = useCamera()
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -167,6 +182,14 @@ export function CameraView({ landmarks, gestureName, isLoaded, holdProgress, cur
             height={480}
             style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
           />
+
+          {import.meta.env.DEV && twoHandLandmarks && (
+            <DevCaptureOverlay
+              right={twoHandLandmarks.right}
+              left={twoHandLandmarks.left}
+              faceFeatures={faceFeatures ?? null}
+            />
+          )}
 
           {/* Gesture label pill */}
           {gestureName && gestureName !== 'None' && (

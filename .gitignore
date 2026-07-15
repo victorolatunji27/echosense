@@ -30,5 +30,8 @@ model/data/
 model/**/__pycache__/
 model/__pycache__/
 
-# MediaPipe HandLandmarker model — auto-downloaded by collect_gestures.py
+# MediaPipe HandLandmarker/FaceLandmarker models — auto-downloaded by collect_gestures.py
 model/hand_landmarker.task
+model/face_landmarker.task
+.vercel
+.env*

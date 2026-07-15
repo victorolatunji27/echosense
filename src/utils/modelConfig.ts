@@ -47,3 +47,39 @@ export const LSTM_SEQUENCE_LENGTH = 30
 // Number of features per frame:
 // 21 landmarks × 3 coordinates (x, y, z) = 63
 export const LANDMARK_FEATURE_COUNT = 63
+
+// ── Two-hand + non-manual (face) feature layout ─────────────────────────
+//
+// Widens capture beyond the single-hand-only pipeline above so a future
+// model can consume both hands and ASL's grammatical facial markers
+// (question form, negation, topic marking, intensity). This is plumbing
+// only — LSTM_LABELS / LANDMARK_FEATURE_COUNT above still describe the
+// CURRENT single-hand model. Nothing consumes FRAME_FEATURE_COUNT yet;
+// that's Prompt 6B.
+
+// 21 landmarks × (x, y, z) per hand — same layout as LANDMARK_FEATURE_COUNT,
+// named separately here since this section describes the two-hand vector.
+export const HAND_FEATURE_COUNT = 63
+
+// Two hands, fixed slot order [right, left]. A missing hand is zero-padded
+// rather than omitted, so every frame vector is the same length regardless
+// of how many hands are actually in frame.
+export const TWO_HAND_FEATURE_COUNT = HAND_FEATURE_COUNT * 2 // 126
+
+// Compact non-manual feature set extracted from MediaPipe FaceLandmarker's
+// 52 blendshape categories — brow raise/lower, eye openness, and mouth
+// shape, the ARKit blendshape names that carry ASL grammar signal (question
+// form, negation, intensity). Order is fixed and MUST match
+// FACE_BLENDSHAPE_KEYS in src/utils/frameFeatures.ts and the mirrored list
+// in model/collect_gestures.py.
+export const FACE_FEATURE_COUNT = 12
+
+// Combined per-frame vector: both hands + compact face features.
+export const FRAME_FEATURE_COUNT = TWO_HAND_FEATURE_COUNT + FACE_FEATURE_COUNT // 138
+
+// Gates the two-hand + face capture pipeline (FaceLandmarker model load,
+// wide buffer collection, dev capture overlay). Turning this off drops back
+// to hand-only capture with zero added cost from face tracking. The
+// existing single-hand CNN/LSTM/geometric classifiers are unaffected
+// either way — they only ever read the primary hand.
+export const ENABLE_WIDE_CAPTURE = true

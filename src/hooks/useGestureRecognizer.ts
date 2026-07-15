@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { GestureRecognizer, FilesetResolver } from '@mediapipe/tasks-vision'
+import { GestureRecognizer, FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import { classifyASLGesture, type Landmark } from '../utils/aslClassifier'
+import { orderHandsByHandedness, extractFaceFeatures, type TwoHandSlots } from '../utils/frameFeatures'
+import { ENABLE_WIDE_CAPTURE } from '../utils/modelConfig'
 import type { CNNPrediction } from './useCNNClassifier'
 import type { LSTMPrediction } from './useLSTMClassifier'
+
+const FACE_LANDMARKER_MODEL_URL =
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+
+const EMPTY_HAND_SLOTS: TwoHandSlots = { right: null, left: null, rightIndex: null, leftIndex: null }
 
 const MEDIAPIPE_BUILTINS = new Set([
   'Thumb_Up', 'Thumb_Down', 'Open_Palm', 'Closed_Fist',
@@ -106,6 +113,9 @@ function logTier(source: GestureSource, gesture: string | null, confidence: numb
 }
 
 interface GestureResult {
+  // Primary hand (right if present, else left) — unchanged shape/meaning
+  // from before two-hand support, so the CNN/geometric classifier and the
+  // legacy LSTM buffer keep working exactly as they did.
   landmarks: Landmark[] | null
   gestureName: string | null
   gestureScore: number
@@ -114,6 +124,13 @@ interface GestureResult {
   // A hand is in frame but recent predictions disagree — the UI should
   // show a soft "didn't catch that" hint instead of a guess.
   isUnsure: boolean
+  // Both hands in fixed [right, left] slots — plumbing for the wide
+  // capture pipeline (see modelConfig.ts ENABLE_WIDE_CAPTURE) and the dev
+  // capture overlay. Not consumed by any classifier yet.
+  twoHandLandmarks: TwoHandSlots
+  // Compact non-manual (face) feature vector, or null when face tracking
+  // is disabled or no face is detected. Same caveat as twoHandLandmarks.
+  faceFeatures: number[] | null
 }
 
 export function useGestureRecognizer(
@@ -131,6 +148,7 @@ export function useGestureRecognizer(
   } = options
 
   const recognizerRef = useRef<GestureRecognizer | null>(null)
+  const faceLandmarkerRef = useRef<FaceLandmarker | null>(null)
   const rafRef = useRef<number>(0)
   const [isLoaded, setIsLoaded] = useState(false)
   const [landmarks, setLandmarks] = useState<Landmark[] | null>(null)
@@ -138,6 +156,8 @@ export function useGestureRecognizer(
   const [gestureScore, setGestureScore] = useState(0)
   const [source, setSource] = useState<GestureSource>(null)
   const [isUnsure, setIsUnsure] = useState(false)
+  const [twoHandLandmarks, setTwoHandLandmarks] = useState<TwoHandSlots>(EMPTY_HAND_SLOTS)
+  const [faceFeatures, setFaceFeatures] = useState<number[] | null>(null)
 
   // Keep latest option refs so the rAF loop always reads current values
   const cnnClassifyRef = useRef(cnnClassify)
@@ -179,11 +199,36 @@ export function useGestureRecognizer(
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
-        numHands: 1,
+        numHands: 2,
       })
+
+      // Face tracking runs as a second, independent MediaPipe task on the
+      // same video frames. It's additive — if it fails to load (e.g. slow
+      // network, unsupported GPU path), hand tracking still works.
+      let faceLandmarker: FaceLandmarker | null = null
+      if (ENABLE_WIDE_CAPTURE) {
+        try {
+          faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: FACE_LANDMARKER_MODEL_URL,
+              delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            numFaces: 1,
+            outputFaceBlendshapes: true,
+          })
+        } catch (err) {
+          console.warn('[useGestureRecognizer] FaceLandmarker failed to load — continuing hand-only', err)
+        }
+      }
+
       if (!cancelled) {
         recognizerRef.current = recognizer
+        faceLandmarkerRef.current = faceLandmarker
         setIsLoaded(true)
+      } else {
+        recognizer.close()
+        faceLandmarker?.close()
       }
     }
 
@@ -193,6 +238,7 @@ export function useGestureRecognizer(
       cancelled = true
       cancelAnimationFrame(rafRef.current)
       recognizerRef.current?.close()
+      faceLandmarkerRef.current?.close()
     }
   }, [])
 
@@ -205,11 +251,30 @@ export function useGestureRecognizer(
       if (video && recognizer && video.readyState >= 2) {
         const results = recognizer.recognizeForVideo(video, Date.now())
 
-        const rawLandmarks = results.landmarks[0] ?? null
-        const mediapipeGesture = results.gestures[0]?.[0]?.categoryName ?? null
-        const score = results.gestures[0]?.[0]?.score ?? 0
+        // Two hands, ordered into fixed [right, left] slots. The primary
+        // hand (right if present, else left) is what every existing
+        // single-hand consumer (CNN, geometric classifier, legacy LSTM
+        // buffer) reads — same shape/meaning as before two-hand support.
+        const handSlots = orderHandsByHandedness(results.landmarks, results.handedness)
+        const primaryLandmarks = handSlots.right ?? handSlots.left ?? null
+        const primaryIndex = handSlots.rightIndex ?? handSlots.leftIndex
 
-        setLandmarks(rawLandmarks)
+        const mediapipeGesture =
+          primaryIndex !== null ? (results.gestures[primaryIndex]?.[0]?.categoryName ?? null) : null
+        const score =
+          primaryIndex !== null ? (results.gestures[primaryIndex]?.[0]?.score ?? 0) : 0
+
+        setLandmarks(primaryLandmarks)
+        setTwoHandLandmarks(handSlots)
+
+        // Face tracking runs as a second, independent MediaPipe task on the
+        // same frame. Plumbing only — nothing consumes this yet.
+        if (ENABLE_WIDE_CAPTURE && faceLandmarkerRef.current) {
+          const faceResult = faceLandmarkerRef.current.detectForVideo(video, Date.now())
+          setFaceFeatures(extractFaceFeatures(faceResult.faceBlendshapes))
+        } else {
+          setFaceFeatures(null)
+        }
 
         // ── Priority waterfall ────────────────────────────────────────────
         //
@@ -224,11 +289,11 @@ export function useGestureRecognizer(
         // result lands in cnnResultRef and is consumed by tier 2 below on a
         // later frame — the loop itself never awaits.
         const now = performance.now()
-        if (rawLandmarks && cnnAvailableRef.current && cnnClassifyRef.current) {
+        if (primaryLandmarks && cnnAvailableRef.current && cnnClassifyRef.current) {
           if (!cnnBusyRef.current && now - cnnLastKickRef.current >= CNN_INTERVAL_MS) {
             cnnBusyRef.current = true
             cnnLastKickRef.current = now
-            cnnClassifyRef.current(video, rawLandmarks)
+            cnnClassifyRef.current(video, primaryLandmarks)
               .then((result) => {
                 cnnResultRef.current = result
                   ? { ...result, at: performance.now() }
@@ -237,7 +302,7 @@ export function useGestureRecognizer(
               .catch(() => { cnnResultRef.current = null })
               .finally(() => { cnnBusyRef.current = false })
           }
-        } else if (!rawLandmarks) {
+        } else if (!primaryLandmarks) {
           // Hand left the frame — drop any stale prediction immediately
           cnnResultRef.current = null
         }
@@ -263,15 +328,15 @@ export function useGestureRecognizer(
           // 2a. MediaPipe built-in first when the consumer only wants the
           //     7 built-ins (phrase/practice) — CNN letters would shadow them
           raw = { name: mediapipeGesture!, score, source: 'mediapipe' }
-        } else if (rawLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
+        } else if (primaryLandmarks && cnnResult && now - cnnResult.at < CNN_RESULT_TTL_MS) {
           // 2. CNN (trained image classifier — most recent fresh result)
           raw = { name: cnnResult.gestureKey, score: cnnResult.confidence, source: 'cnn' }
         } else if (mediapipeFires) {
           // 3. MediaPipe built-in
           raw = { name: mediapipeGesture!, score, source: 'mediapipe' }
-        } else if (rawLandmarks) {
+        } else if (primaryLandmarks) {
           // 4. Geometric classifier (always available)
-          const geometric = classifyASLGesture(rawLandmarks)
+          const geometric = classifyASLGesture(primaryLandmarks)
           raw = {
             name: geometric ?? 'None',
             score: geometric ? 0.85 : 0,
@@ -287,7 +352,7 @@ export function useGestureRecognizer(
         // is visible but predictions disagree, report an explicit "unsure"
         // state instead of a guess. This applies to every tier.
 
-        if (!rawLandmarks) {
+        if (!primaryLandmarks) {
           voteBufferRef.current = []
           setGestureName('None')
           setGestureScore(0)
@@ -319,5 +384,14 @@ export function useGestureRecognizer(
     return () => cancelAnimationFrame(rafRef.current)
   }, [isLoaded, videoRef])
 
-  return { landmarks, gestureName, gestureScore, isLoaded, source, isUnsure }
+  return {
+    landmarks,
+    gestureName,
+    gestureScore,
+    isLoaded,
+    source,
+    isUnsure,
+    twoHandLandmarks,
+    faceFeatures,
+  }
 }

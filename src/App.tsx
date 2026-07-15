@@ -9,6 +9,8 @@ import { useLandmarkBuffer } from './hooks/useLandmarkBuffer'
 import { useSentenceBuilder } from './hooks/useSentenceBuilder'
 import { getDisplayText, PHRASE_PRIORITY_MAP, isPhraseGesture } from './utils/gestureMap'
 import { autocorrectWord } from './utils/spellCorrector'
+import { buildFrameVector } from './utils/frameFeatures'
+import { ENABLE_WIDE_CAPTURE } from './utils/modelConfig'
 import { CameraView } from './components/CameraView'
 import { OutputPanel } from './components/OutputPanel'
 import { SentencePanel } from './components/SentencePanel'
@@ -51,13 +53,22 @@ function App() {
 
   const cnnClassifier = useCNNClassifier()
   const lstmClassifier = useLSTMClassifier()
-  const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer } = useLandmarkBuffer()
+  const { addFrame, getBuffer, isReady: isBufferReady, clearBuffer, addWideFrame } = useLandmarkBuffer()
 
   // Declared before useGestureRecognizer, which reads them
   const [practiceMode, setPracticeMode] = useState(false)
   const [mode, setMode] = useState<'phrase' | 'spell' | 'sentence'>('phrase')
 
-  const { landmarks, gestureName, gestureScore, isLoaded, source, isUnsure } = useGestureRecognizer(
+  const {
+    landmarks,
+    gestureName,
+    gestureScore,
+    isLoaded,
+    source,
+    isUnsure,
+    twoHandLandmarks,
+    faceFeatures,
+  } = useGestureRecognizer(
     videoRef as React.RefObject<HTMLVideoElement>,
     {
       cnnClassify: cnnClassifier.classify,
@@ -235,6 +246,12 @@ function App() {
   // ── Main frame-by-frame gesture loop ───────────────────────────────
   useEffect(() => {
     addFrame(landmarks)
+
+    // Wide (two-hand + face) capture — plumbing only, no model consumes
+    // this yet. See modelConfig.ts ENABLE_WIDE_CAPTURE / FRAME_FEATURE_COUNT.
+    if (ENABLE_WIDE_CAPTURE) {
+      addWideFrame(buildFrameVector(twoHandLandmarks, faceFeatures))
+    }
 
     // Shared hold counter (phrase + sentence modes)
     if (gestureName === prevGestureRef.current && gestureName !== null && gestureName !== 'None') {
@@ -755,6 +772,8 @@ function App() {
             currentLetter={arcLetter}
             isLocked={isLockedState}
             onReady={onReady}
+            twoHandLandmarks={twoHandLandmarks}
+            faceFeatures={faceFeatures}
           />
 
           {mode === 'sentence' ? (
